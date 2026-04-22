@@ -1,0 +1,10 @@
+numpy
+pandas
+scipy
+tqdm
+opencv
+ultralytics
+ipykernel
+pytorch==2.10
+torchvision==0.25
+lap>=0.5.12
