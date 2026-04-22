@@ -160,6 +160,14 @@ def detect_moving_objects(
         )
 
         objects_ellipses = [cv2.fitEllipse(cnt) for cnt in contours]
+        objects_ellipses = [
+            obj
+            for obj in objects_ellipses
+            if (obj[0][0] <= height)
+            and (obj[0][1] <= width)
+            and (obj[0][0] >= 0)
+            and (obj[0][1] >= 0)
+        ]
         # [y, x, axis_long/2, axis_short/2, angle_degree]
         objects_intensities = [
             fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_ellipses
