@@ -15,4 +15,5 @@ __all__ = [
     "connect_tracklets",
     "save_longtracks_movie",
     "load_results_to_df",
+    "plot_longtracks_summary",
 ]

@@ -5,6 +5,8 @@ tqdm
 opencv
 ultralytics
 ipykernel
+ipywidgets
+plotnine
 pytorch==2.10
 torchvision==0.25
 lap>=0.5.12
