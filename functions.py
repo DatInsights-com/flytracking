@@ -22,6 +22,7 @@ from scipy.sparse.csgraph import shortest_path
 from ultralytics.trackers.byte_tracker import BYTETracker
 
 from itertools import product
+from collections import deque
 
 import json
 import gzip
@@ -511,7 +512,7 @@ def save_tracking_movie(
         for track in tracked_objects:
             track_id = track[5]
             if track_id in tracking_history:
-                tracking_history[track_id] = np.concat(
+                tracking_history[track_id] = np.concatenate(
                     [
                         np.array([[track[:2]]], dtype="int32"),
                         tracking_history[track_id],
@@ -524,8 +525,8 @@ def save_tracking_movie(
             else:
                 tracking_history[track_id] = np.array([[track[:2]]], dtype="int32")
             coords = (
-                tuple(track[:2]),
-                tuple([track[2] / 2, track[3] / 2]),
+                (track[0], track[1]),
+                (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
             color = cv2.applyColorMap(
@@ -549,10 +550,10 @@ def save_tracking_movie(
                 frame_tracking,
                 str(int(track_id)),
                 tuple(map(int, np.add(coords[0], 15))),
-                cv2.FONT_HERSHEY_SIMPLEX,
+                cv2.FONT_HERSHEY_DUPLEX,
                 0.8,
                 color=color,
-                thickness=2,
+                thickness=1,
             )
 
         frame_tracking = cv2.resize(
@@ -892,7 +893,7 @@ def save_longtracks_movie(
         int
     )
 
-    max_history = int(max_history * fps)
+    max_history_len = int(max_history * fps)
     tracking_history = {}
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -918,23 +919,17 @@ def save_longtracks_movie(
         tracked_objects = all_tracked_objects[i]
 
         for track in tracked_objects:
-            track_id = track[8]
-            if track_id in tracking_history:
-                tracking_history[track_id] = np.concat(
-                    [
-                        np.array([[track[:2]]], dtype="int32"),
-                        tracking_history[track_id],
-                    ],
-                    axis=0,
-                )
-                tracking_history[track_id] = tracking_history[track_id][
-                    :max_history, ...
-                ]
-            else:
-                tracking_history[track_id] = np.array([[track[:2]]], dtype="int32")
+            track_id = int(track[8])
+            current_pos = (int(track[0]), int(track[1]))
+
+            if track_id not in tracking_history:
+                tracking_history[track_id] = deque(maxlen=max_history_len)
+
+            tracking_history[track_id].append(current_pos)
+
             coords = (
-                tuple(track[:2]),
-                tuple([track[2] / 2, track[3] / 2]),
+                current_pos,
+                (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
             color = cv2.applyColorMap(
@@ -947,19 +942,20 @@ def save_longtracks_movie(
                 color,
                 2,
             )
-            frame_tracking = cv2.polylines(
-                frame_tracking,
-                [tracking_history[track_id]],
-                isClosed=False,
-                color=color,
-                thickness=2,
-            )
             frame_tracking = cv2.putText(
                 frame_tracking,
                 str(int(track_id)),
                 tuple(map(int, np.add(coords[0], 15))),
-                cv2.FONT_HERSHEY_SIMPLEX,
+                cv2.FONT_HERSHEY_DUPLEX,
                 0.8,
+                color=color,
+                thickness=1,
+            )
+            tail_pts = np.array(list(tracking_history[track_id]), dtype=np.int32)
+            frame_tracking = cv2.polylines(
+                frame_tracking,
+                [tail_pts],
+                isClosed=False,
                 color=color,
                 thickness=2,
             )
@@ -970,6 +966,15 @@ def save_longtracks_movie(
             fx=0.5,
             fy=0.5,
             interpolation=cv2.INTER_LINEAR,
+        )
+        frame_tracking = cv2.putText(
+            frame_tracking,
+            f"{i:05}" + "/" + f"{total_frames:05}",
+            (10, 20),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.6,
+            color=(0, 0, 0),
+            thickness=1,
         )
         tracking_movie.write(frame_tracking)
 
