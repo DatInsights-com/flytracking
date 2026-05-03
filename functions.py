@@ -28,6 +28,8 @@ import json
 import gzip
 
 import plotnine as pn
+import multiprocessing as mp
+from time import sleep
 
 import warnings
 
@@ -66,10 +68,12 @@ def create_background_image(
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
+    nb_frames = min([nb_frames, total_frames])
 
-    background = np.zeros((height, width), dtype=np.float32)
     stride = int(np.max([1, max_time * fps / nb_frames]))
+    background = np.zeros((height, width), dtype=np.float32)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     for i in tqdm(range(nb_frames)):
@@ -77,11 +81,16 @@ def create_background_image(
         ret, frame = cap.read()
         if not ret:
             break
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        background = background + (frame_gray / nb_frames)
+        background = cv2.add(
+            background,
+            cv2.cvtColor(frame.astype(np.float32), cv2.COLOR_BGR2GRAY),
+        )
     cap.release()
 
-    cv2.imwrite(BACKGROUND_FILE, background.astype(np.uint8))
+    background = cv2.multiply(background, 1.0 / nb_frames)
+    background = background.astype(np.uint8)
+
+    cv2.imwrite(BACKGROUND_FILE, background)
 
 
 # detect moving objects in every frame of movie after background substraction and filtering
@@ -99,10 +108,12 @@ def detect_moving_objects(
 
     MIN_INTESITY = 7
     MIN_AREA = 7
-    MIN_SOLIDITY = 0.7
-    PRCTILE_INTENSITY = 99.9
+    # MIN_SOLIDITY = 0.7
+    # PRCTILE_INTENSITY = 99.9
+    MASK_THRESHOLD = 1.9
     GAUSSIAN_STD = 11
     MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
+    THREAD_NUM = cv2.getNumberOfCPUs()
 
     bgframe = cv2.imread(BACKGROUND_FILE, cv2.IMREAD_GRAYSCALE)
     bgframe = bgframe.astype(np.float32)
@@ -117,90 +128,114 @@ def detect_moving_objects(
 
     all_detected_objects = [[] for _ in range(total_frames)]
 
+    pool = mp.Pool(processes=THREAD_NUM)
+    pending_tasks = deque()
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     for i in tqdm(range(total_frames)):
         ret, frame = cap.read()
         if not ret:
             break
-
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        frame_gray = cv2.cvtColor(frame.astype(np.float32), cv2.COLOR_BGR2GRAY)
         fg_frame = cv2.subtract(bgframe, frame_gray)
-        fg_smooth = cv2.GaussianBlur(
-            fg_frame, (GAUSSIAN_STD, GAUSSIAN_STD), 0
-        ) - cv2.GaussianBlur(fg_frame, (GAUSSIAN_STD * 3, GAUSSIAN_STD * 3), 0)
 
-        threshold_mask = np.percentile(fg_smooth, PRCTILE_INTENSITY)
-
-        fg_mask = cv2.threshold(fg_smooth, threshold_mask, 255, cv2.THRESH_BINARY)[1]
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, MORPH_KERNEL)
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, MORPH_KERNEL)
-
-        total_labels, label_ids = cv2.connectedComponents(
-            fg_mask.astype(np.uint8), 4, cv2.CV_32S
+        task = pool.apply_async(
+            process_frame_detection,
+            args=(
+                fg_frame,
+                GAUSSIAN_STD,
+                MASK_THRESHOLD,
+                MORPH_KERNEL,
+                MIN_INTESITY,
+                MIN_AREA,
+            ),
         )
-
-        for id in range(1, total_labels):
-            max_int = np.max(fg_smooth[label_ids == id])
-            label_ids[
-                (label_ids == id) & (fg_smooth < np.max([MIN_INTESITY, (max_int / 3)]))
-            ] = 0
-
-        fg_mask = 255 * (label_ids > 0).astype(np.uint8)
-        contours, _ = cv2.findContours(
-            255 * (label_ids > 0).astype(np.uint8),
-            cv2.RETR_LIST,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-
-        contours = [cnt for cnt in contours if len(cnt) > 4]
-
-        contours_area = [cv2.contourArea(cnt) for cnt in contours]
-        contour_solidity = np.divide(
-            contours_area,
-            [cv2.contourArea(cv2.convexHull(cnt)) for cnt in contours],
-        )
-
-        contours, contours_area, contour_solidity = zip(
-            *[
-                (cnt, ar, sol)
-                for (cnt, ar, sol) in zip(contours, contours_area, contour_solidity)
-                if (len(cnt) > 4) and (ar > MIN_AREA) and (sol > MIN_SOLIDITY)
-            ]
-        )
-
-        objects_ellipses = [cv2.fitEllipse(cnt) for cnt in contours]
-        objects_ellipses = [
-            obj
-            for obj in objects_ellipses
-            if (obj[0][0] <= height)
-            and (obj[0][1] <= width)
-            and (obj[0][0] >= 0)
-            and (obj[0][1] >= 0)
-        ]
-        # [y, x, axis_long/2, axis_short/2, angle_degree]
-        objects_intensities = [
-            fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_ellipses
-        ]
-        objects_properties = np.stack(
-            [
-                [o[1][0] for o in objects_ellipses],
-                [o[1][1] for o in objects_ellipses],
-                objects_intensities,
-            ],
-            axis=1,
-        )
-        confidence = calculate_confidence(objects_properties)
-        objects_ellipses = [
-            [a, b, 2.5 * c, 2.5 * d, radians(e), f]
-            for ((a, b), (c, d), e), (f) in zip(objects_ellipses, confidence)
-            if f > 0
-        ]
-        all_detected_objects[i] = objects_ellipses
-
+        pending_tasks.append(task)
     cap.release()
+
+    idx = 0
+    while len(pending_tasks) > 0:
+        if pending_tasks[0].ready():
+            res = pending_tasks.popleft().get()
+            all_detected_objects[idx] = res
+            idx += 1
+        else:
+            sleep(1)
+
+    pool.close()
+    pool.join()
 
     with gzip.open(DETECTION_FILE, "wt") as f:
         json.dump(all_detected_objects, f)
+
+
+def process_frame_detection(
+    fg_frame, gaussian_std, mask_threshold, morph_kernel, min_intensity, min_area
+):
+
+    fg_smooth = cv2.subtract(
+        cv2.GaussianBlur(fg_frame, (gaussian_std, gaussian_std), 0),
+        cv2.GaussianBlur(fg_frame, (gaussian_std * 3, gaussian_std * 3), 0),
+    )
+
+    fg_mask = cv2.threshold(fg_smooth, mask_threshold, 255, cv2.THRESH_BINARY)[1]
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, morph_kernel)
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, morph_kernel).astype(np.uint8)
+
+    total_labels, label_ids = cv2.connectedComponents(fg_mask, 4, cv2.CV_32S)
+
+    for id in range(1, total_labels):
+        max_int = np.max(fg_smooth[label_ids == id])
+        label_ids[
+            (label_ids == id) & (fg_smooth < np.max([min_intensity, (max_int / 3)]))
+        ] = 0
+
+    fg_mask = np.astype(255 * (label_ids > 0), np.uint8)
+    contours, _ = cv2.findContours(
+        fg_mask,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    contours_area = [cv2.contourArea(cnt) for cnt in contours]
+
+    contours, contours_area = zip(
+        *[
+            (cnt, ar)
+            for (cnt, ar) in zip(contours, contours_area)
+            if (len(cnt) > 4) and (ar > min_area)
+        ]
+    )
+
+    objects_ellipses = [cv2.fitEllipse(cnt) for cnt in contours]
+    objects_ellipses = [
+        obj
+        for obj in objects_ellipses
+        if (obj[0][0] < fg_mask.shape[1])
+        and (obj[0][1] < fg_mask.shape[0])
+        and (obj[0][0] >= 0)
+        and (obj[0][1] >= 0)
+    ]
+    # [y, x, axis_long/2, axis_short/2, angle_degree]
+    objects_intensities = [
+        fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_ellipses
+    ]
+    objects_properties = np.stack(
+        [
+            [o[1][0] for o in objects_ellipses],
+            [o[1][1] for o in objects_ellipses],
+            objects_intensities,
+        ],
+        axis=1,
+    )
+    confidence = calculate_confidence(objects_properties)
+    objects_ellipses = [
+        [a, b, 2.5 * c, 2.5 * d, radians(e), f]
+        for ((a, b), (c, d), e), (f) in zip(objects_ellipses, confidence)
+        if f > 0
+    ]
+
+    return objects_ellipses
 
 
 # define class to store tracker configuration from ultralytics
@@ -275,7 +310,7 @@ def track_moving_objects(video_path: str, out_dir: str, max_time: int, overwrite
     TRACK_HIGH_THRESH = 0
     TRACK_LOW_THRESH = 0
     NEW_TRACK_THRESH = 0
-    TRACK_BUFFER = 20
+    TRACK_BUFFER = 0
     MATCH_THRESH = 0.999
     FUSE_SCORE = True
 
@@ -394,6 +429,15 @@ def save_detection_movie(video_path: str, out_dir: str, max_time: int, overwrite
             fy=0.5,
             interpolation=cv2.INTER_LINEAR,
         )
+        frame_ellipse = cv2.putText(
+            frame_ellipse,
+            f"{i:05}" + "/" + f"{total_frames:05}",
+            (10, 20),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.6,
+            color=(0, 0, 0),
+            thickness=1,
+        )
         detection_movie.write(frame_ellipse)
 
     detection_movie.release()
@@ -453,6 +497,15 @@ def save_leftovers_movie(video_path: str, out_dir: str, max_time: int, overwrite
             fx=0.5,
             fy=0.5,
             interpolation=cv2.INTER_LINEAR,
+        )
+        frame_ellipse = cv2.putText(
+            frame_ellipse,
+            f"{i:05}" + "/" + f"{total_frames:05}",
+            (10, 20),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.6,
+            color=(0, 0, 0),
+            thickness=1,
         )
         detection_movie.write(frame_ellipse)
 
@@ -563,6 +616,15 @@ def save_tracking_movie(
             fy=0.5,
             interpolation=cv2.INTER_LINEAR,
         )
+        frame_tracking = cv2.putText(
+            frame_tracking,
+            f"{i:05}" + "/" + f"{total_frames:05}",
+            (10, 20),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.6,
+            color=(0, 0, 0),
+            thickness=1,
+        )
         tracking_movie.write(frame_tracking)
 
     tracking_movie.release()
@@ -584,7 +646,7 @@ def connect_tracklets(video_path: str, out_dir: str, max_time: int, overwrite: b
     PROB_DOUBLE_DETECTION = 1e-4
     T_DIST_DF = 11
     MIN_PROB_THRESH = 0
-    MIN_OBJECT_CONFIDENCE = 0.5
+    MIN_OBJECT_CONFIDENCE = 0.25
 
     with gzip.open(TRACKING_FILE, "rt") as f:
         all_tracked_objects = json.load(f)
@@ -1245,11 +1307,12 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
     ):
         return
 
-    MIN_RELATIVE_LENGTH = 0.25
-
     data = load_results_to_df(video_path, out_dir, "longtracks")
-
     total_frames = data["frame"].max() - data["frame"].min() + 1
+
+    MIN_RELATIVE_LENGTH = 0.25
+    MOVING_AVG_WINDOW = min(6000, total_frames)
+
     length = (data.groupby("track_id")["frame"].count() / total_frames).sort_values(
         ascending=False
     )
@@ -1298,7 +1361,11 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         pn.ggplot(data)
         + pn.aes(x="frame", y="diff_xy", color="track_id")
         + pn.geom_smooth(
-            method="mavg", method_args={"window": 6000}, na_rm=True, se=False, size=0.5
+            method="mavg",
+            method_args={"window": MOVING_AVG_WINDOW},
+            na_rm=True,
+            se=False,
+            size=0.5,
         )
     )
 
