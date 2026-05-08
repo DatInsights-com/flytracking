@@ -25,6 +25,8 @@ T_DIST_DF = 11
 MIN_PROB_THRESH = 0
 MIN_OBJECT_CONFIDENCE = 0.25
 
+N_TRACK_COLORS = 16
+
 
 def connect_tracklets(
     video_path: str, out_dir: str, total_frames: int, overwrite: bool
@@ -134,7 +136,7 @@ def linear_interpolate_tracklets(all_tracked_objects):
     objects_df["frame"] = objects_df["frame"].astype("int")
     objects_df["tracklet_id"] = objects_df["tracklet_id"].astype("int")
 
-    interpolated_df = pd.DataFrame()
+    all_tracks = []
     tracklet_id = objects_df["tracklet_id"].unique()
     for id in tracklet_id:
         tracks = objects_df.loc[objects_df["tracklet_id"] == id]
@@ -144,7 +146,8 @@ def linear_interpolate_tracklets(all_tracked_objects):
                 np.arange(tracks["frame"].min(), tracks["frame"].max() + 1),
                 fill_value=np.nan,
             ).interpolate()
-        interpolated_df = pd.concat([interpolated_df, tracks], ignore_index=True)
+        all_tracks.append(tracks)
+    interpolated_df = pd.concat(all_tracks, ignore_index=True)
     interpolated_df["tracklet_id"] = interpolated_df["tracklet_id"].astype("int")
     interpolated_df["frame"] = interpolated_df["frame"].astype("int")
     return interpolated_df
@@ -159,9 +162,9 @@ def relabel_tracklets_with_paths(data, paths):
             np.isin(data_relabeled["tracklet_id"], track), "long_track_id"
         ] = track[0]
 
-    data_relabeled.sort_values(by=["frame", "tracklet_id"], inplace=True)
-    data_relabeled.drop_duplicates(
-        ["frame", "long_track_id"], keep="first", ignore_index=True, inplace=True
+    data_relabeled = data_relabeled.sort_values(by=["frame", "tracklet_id"])
+    data_relabeled = data_relabeled.drop_duplicates(
+        ["frame", "long_track_id"], keep="first", ignore_index=True
     )
     return data_relabeled
 
@@ -338,8 +341,13 @@ def save_longtracks_movie(
     max_history_len = int(max_history * fps)
     tracking_history = {}
 
+    colors_bgr = []
+    for h in np.linspace(0, 180, N_TRACK_COLORS, endpoint=False):
+        bgr = cv2.cvtColor(np.uint8([[[h, 255, 255]]]), cv2.COLOR_HSV2BGR)[0][0]
+        colors_bgr.append(tuple(bgr.tolist()))
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
     tracking_movie = cv2.VideoWriter(
         TRACKING_VIDEO_FILE,
         fourcc,
@@ -374,10 +382,7 @@ def save_longtracks_movie(
                 (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
-            color = cv2.applyColorMap(
-                np.array(((track_id * 29) % 255), dtype="uint8"), cv2.COLORMAP_HSV
-            )[0][0]
-            color = tuple(color.tolist())
+            color = colors_bgr[track_id % 16]
             frame_tracking = cv2.ellipse(
                 frame_tracking,
                 coords,
@@ -407,7 +412,7 @@ def save_longtracks_movie(
             None,
             fx=0.5,
             fy=0.5,
-            interpolation=cv2.INTER_LINEAR,
+            interpolation=cv2.INTER_AREA,
         )
         frame_tracking = cv2.putText(
             frame_tracking,

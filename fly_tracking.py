@@ -13,6 +13,8 @@ from math import degrees
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
+from collections import deque
+
 from ultralytics.trackers.byte_tracker import BYTETracker
 
 import json
@@ -26,6 +28,8 @@ NEW_TRACK_THRESH = 0
 TRACK_BUFFER = 0
 MATCH_THRESH = 0.999
 FUSE_SCORE = True
+
+N_TRACK_COLORS = 16
 
 
 class Tracker_cfg:
@@ -106,7 +110,7 @@ def track_moving_objects(
             obj_cls = []
             for obj in objects_ellipses:
                 xywhr.append(obj[:5])
-                conf.append(obj[5]),
+                conf.append(obj[5])
                 obj_cls.append(0)
 
             objects = Detections(np.array(xywhr), np.array(conf), np.array(obj_cls))
@@ -154,11 +158,16 @@ def save_tracking_movie(
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = np.min([cap.get(cv2.CAP_PROP_FRAME_COUNT), total_frames]).astype(int)
 
-    max_history = int(max_history * fps)
+    max_history_len = int(max_history * fps)
     tracking_history = {}
 
+    colors_bgr = []
+    for h in np.linspace(0, 180, N_TRACK_COLORS, endpoint=False):
+        bgr = cv2.cvtColor(np.uint8([[[h, 255, 255]]]), cv2.COLOR_HSV2BGR)[0][0]
+        colors_bgr.append(tuple(bgr.tolist()))
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
     tracking_movie = cv2.VideoWriter(
         TRACKING_VIDEO_FILE,
         fourcc,
@@ -180,38 +189,30 @@ def save_tracking_movie(
         tracked_objects = all_tracked_objects[i]
 
         for track in tracked_objects:
-            track_id = track[5]
-            if track_id in tracking_history:
-                tracking_history[track_id] = np.concatenate(
-                    [
-                        np.array([[track[:2]]], dtype="int32"),
-                        tracking_history[track_id],
-                    ],
-                    axis=0,
-                )
-                tracking_history[track_id] = tracking_history[track_id][
-                    :max_history, ...
-                ]
-            else:
-                tracking_history[track_id] = np.array([[track[:2]]], dtype="int32")
+            track_id = int(track[5])
+            current_pos = (int(track[0]), int(track[1]))
+
+            if track_id not in tracking_history:
+                tracking_history[track_id] = deque(maxlen=max_history_len)
+
+            tracking_history[track_id].append(current_pos)
+
             coords = (
                 (track[0], track[1]),
                 (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
-            color = cv2.applyColorMap(
-                np.array(((track_id * 29) % 255), dtype="uint8"), cv2.COLORMAP_HSV
-            )[0][0]
-            color = tuple(color.tolist())
+            color = colors_bgr[track_id % 16]
             frame_tracking = cv2.ellipse(
                 frame_tracking,
                 coords,
                 color,
                 2,
             )
+            tail_pts = np.array(list(tracking_history[track_id]), dtype=np.int32)
             frame_tracking = cv2.polylines(
                 frame_tracking,
-                [tracking_history[track_id]],
+                [tail_pts],
                 isClosed=False,
                 color=color,
                 thickness=2,
@@ -231,7 +232,7 @@ def save_tracking_movie(
             None,
             fx=0.5,
             fy=0.5,
-            interpolation=cv2.INTER_LINEAR,
+            interpolation=cv2.INTER_AREA,
         )
         frame_tracking = cv2.putText(
             frame_tracking,

@@ -19,10 +19,10 @@ import json
 import gzip
 
 N_MAX_OBJS_PER_FRAME = 100
-N_WORKERS = 16
-N_FRAME_QUEUE = 400
+N_WORKERS = os.cpu_count()
+N_FRAME_QUEUE = N_WORKERS * 20
 
-MIN_INTESITY = 7
+MIN_INTENSITY = 7
 MIN_AREA = 7
 GAUSSIAN_STD = 11
 MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
@@ -247,7 +247,7 @@ def process_frame_detection(fg_frame):
         cv2.GaussianBlur(fg_frame, (GAUSSIAN_STD * 3, GAUSSIAN_STD * 3), 0),
     )
 
-    fg_mask = cv2.threshold(fg_smooth, MIN_INTESITY, 255, cv2.THRESH_BINARY)[1]
+    fg_mask = cv2.threshold(fg_smooth, MIN_INTENSITY, 255, cv2.THRESH_BINARY)[1]
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, MORPH_KERNEL)
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, MORPH_KERNEL).astype(np.uint8)
 
@@ -256,7 +256,7 @@ def process_frame_detection(fg_frame):
     for id in range(1, total_labels):
         mask = label_ids == id
         max_int = np.max(fg_smooth[mask])
-        label_ids[mask & (fg_smooth < np.max([MIN_INTESITY, (max_int / 3)]))] = 0
+        label_ids[mask & (fg_smooth < np.max([MIN_INTENSITY, (max_int / 3)]))] = 0
 
     fg_mask = (255 * (label_ids > 0)).astype(np.uint8)
     contours, _ = cv2.findContours(
@@ -348,7 +348,7 @@ def save_detection_movie(
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
     detection_movie = cv2.VideoWriter(
         DETECTION_VIDEO_FILE,
         fourcc,
@@ -377,7 +377,7 @@ def save_detection_movie(
             None,
             fx=0.5,
             fy=0.5,
-            interpolation=cv2.INTER_LINEAR,
+            interpolation=cv2.INTER_AREA,
         )
         frame_ellipse = cv2.putText(
             frame_ellipse,

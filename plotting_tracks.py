@@ -13,10 +13,15 @@ import matplotlib
 import plotnine as pn
 from itertools import product
 
-TIME_RESOLUTION = 20
-MAX_REL_PERIOD = 0.5
+TIME_RESOLUTION_MSD = int(20)
+MAX_REL_PERIOD_MSD = 0.5
+
+TIME_RESOLUTION_VAC = int(2)
+MAX_REL_PERIOD_VAC = 0.1
+
 MIN_RELATIVE_LENGTH = 0.25
-MOVING_AVG_WINDOW = 6000
+MOVING_AVG_WINDOW = int(6000)
+
 
 matplotlib.use("qtagg")
 
@@ -86,7 +91,7 @@ def load_results_to_df(
         results["track_id"] = results["track_id"].astype("int")
         results["temp_id"] = results["track_id"]
 
-    results.sort_values(["temp_id", "frame"], inplace=True)
+    results = results.sort_values(["temp_id", "frame"])
     results["diff_frame"] = -results.groupby("temp_id")["frame"].diff(periods=-1)
     results["diff_x"] = (
         -results.groupby("temp_id")["x"].diff(periods=-1) / results["diff_frame"]
@@ -114,7 +119,7 @@ def load_results_to_df(
     )
     results["cumul_dist"] = results.groupby("temp_id")["cumul_dist"].cumsum()
 
-    results.drop("temp_id", inplace=True, axis=1)
+    results = results.drop("temp_id", axis=1)
     return results
 
 
@@ -154,7 +159,9 @@ def calculate_msd_lontracks(video_path: str, out_dir: str):
     calculations = pd.DataFrame(
         product(
             results["track_id"].unique(),
-            range(0, int(MAX_REL_PERIOD * max(results["frame"])), TIME_RESOLUTION),
+            range(
+                0, int(MAX_REL_PERIOD_MSD * max(results["frame"])), TIME_RESOLUTION_MSD
+            ),
         ),
         columns=["track_id", "period"],
     )
@@ -162,17 +169,17 @@ def calculate_msd_lontracks(video_path: str, out_dir: str):
 
     for id in results["track_id"].unique():
         data = results.loc[results["track_id"] == id]
-        data.sort_values(["frame"], inplace=True)
+        data = data.sort_values(["frame"])
         calculations.loc[
             (calculations["track_id"] == id) & (calculations["period"] == 0), "msd"
         ] = 0
 
         for p in range(
-            TIME_RESOLUTION,
+            TIME_RESOLUTION_MSD,
             min(
                 calculations["period"].max(), data["frame"].max() - data["frame"].min()
             ),
-            TIME_RESOLUTION,
+            TIME_RESOLUTION_MSD,
         ):
             msd = data["x"].diff(periods=p).pow(2) + data["y"].diff(periods=p).pow(2)
             calculations.loc[
@@ -183,9 +190,6 @@ def calculate_msd_lontracks(video_path: str, out_dir: str):
 
 
 def calculate_vac_lontracks(video_path: str, out_dir: str):
-
-    TIME_RESOLUTION = int(2)
-    MAX_REL_PERIOD = 0.1
 
     video_name = os.path.basename(video_path).split(".")[0]
 
@@ -225,19 +229,20 @@ def calculate_vac_lontracks(video_path: str, out_dir: str):
                 0,
                 int(
                     np.power(
-                        MAX_REL_PERIOD * results["frame"].max(), 1 / TIME_RESOLUTION
+                        MAX_REL_PERIOD_VAC * results["frame"].max(),
+                        1 / TIME_RESOLUTION_VAC,
                     )
                 ),
             ),
         ),
         columns=["track_id", "period"],
     )
-    calculations["period"] = calculations["period"].pow(TIME_RESOLUTION)
+    calculations["period"] = calculations["period"].pow(TIME_RESOLUTION_VAC)
     calculations["vac"] = np.nan
 
     for id in results["track_id"].unique():
         data = results.loc[results["track_id"] == id]
-        data.sort_values(["frame"], inplace=True)
+        data = data.sort_values(["frame"])
         calculations.loc[
             (calculations["track_id"] == id) & (calculations["period"] == 0), "vac"
         ] = 1
@@ -392,5 +397,5 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         & pn.theme(figure_size=(8.268, 11.693), legend_position="none")
     )
 
-    p1.save(TRACKING_PLOTS, width=8.268, height=11.693, dpi=600)
-    plot.save(SUMMARY_PLOTS, dpi=600)
+    p1.save(TRACKING_PLOTS, width=8.268, height=11.693, dpi=600, verbose=False)
+    plot.save(SUMMARY_PLOTS, dpi=600, verbose=False)
