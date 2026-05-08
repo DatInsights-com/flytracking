@@ -1,11 +1,8 @@
 numpy
 pandas
 scipy
-tqdm
 opencv
 ultralytics
-ipykernel
-ipywidgets
 plotnine
 pytorch==2.10
 torchvision==0.25
