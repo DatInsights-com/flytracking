@@ -22,9 +22,10 @@ N_MAX_OBJS_PER_FRAME = 100
 N_WORKERS = os.cpu_count()
 N_FRAME_QUEUE = N_WORKERS * 20
 
-MIN_INTENSITY = 7
-MIN_AREA = 7
-GAUSSIAN_STD = 11
+MIN_INTENSITY = 2
+MIN_AREA = 3
+GAUSSIAN_STD = 3
+DOG_FACTOR = 1.6  # scaling factor difference of Gaussian
 MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
 
 
@@ -243,39 +244,53 @@ def worker_process(
 def process_frame_detection(fg_frame):
 
     fg_smooth = cv2.subtract(
-        cv2.GaussianBlur(fg_frame, (GAUSSIAN_STD, GAUSSIAN_STD), 0),
-        cv2.GaussianBlur(fg_frame, (GAUSSIAN_STD * 3, GAUSSIAN_STD * 3), 0),
+        cv2.GaussianBlur(fg_frame, (0, 0), GAUSSIAN_STD),
+        cv2.GaussianBlur(fg_frame, (0, 0), GAUSSIAN_STD * DOG_FACTOR),
     )
 
-    fg_mask = cv2.threshold(fg_smooth, MIN_INTENSITY, 255, cv2.THRESH_BINARY)[1]
+    fg_mask = cv2.threshold(fg_smooth, MIN_INTENSITY, 255, cv2.THRESH_BINARY)[1].astype(
+        np.uint8
+    )
+    fg_dilate_maxima = cv2.dilate(fg_smooth, MORPH_KERNEL)
+
+    fg_mask = (fg_mask > 0) & (fg_smooth > (0.33 * fg_dilate_maxima)).astype(np.uint8)
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, MORPH_KERNEL)
-    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, MORPH_KERNEL).astype(np.uint8)
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, MORPH_KERNEL)
 
-    total_labels, label_ids = cv2.connectedComponents(fg_mask, 4, cv2.CV_32S)
+    fg_maxima_mask = (fg_smooth == fg_dilate_maxima) & fg_mask
+    fg_maxima = np.transpose(np.where(fg_maxima_mask)).astype(np.float32)
+    fg_maxima[:, [0, 1]] = fg_maxima[:, [1, 0]]
 
-    for id in range(1, total_labels):
-        mask = label_ids == id
-        max_int = np.max(fg_smooth[mask])
-        label_ids[mask & (fg_smooth < np.max([MIN_INTENSITY, (max_int / 3)]))] = 0
-
-    fg_mask = (255 * (label_ids > 0)).astype(np.uint8)
     contours, _ = cv2.findContours(
         fg_mask,
         cv2.RETR_LIST,
         cv2.CHAIN_APPROX_SIMPLE,
     )
 
-    contours_area = [cv2.contourArea(cnt) for cnt in contours]
+    all_contours = []
+    for cnt in contours:
+        n_max = 0
+        for pt in fg_maxima:
+            if cv2.pointPolygonTest(cnt, pt, False) > 0:
+                n_max += 1
+        if n_max > 1:
+            supp_cnts = watershed_segmentation(cnt, fg_smooth, fg_mask, fg_maxima_mask)
+            for c in supp_cnts:
+                all_contours.append(c)
+        else:
+            all_contours.append(cnt)
 
-    contours, contours_area = zip(
+    contours_area = [cv2.contourArea(cnt) for cnt in all_contours]
+
+    all_contours, contours_area = zip(
         *[
             (cnt, ar)
-            for (cnt, ar) in zip(contours, contours_area)
+            for (cnt, ar) in zip(all_contours, contours_area)
             if (len(cnt) > 4) and (ar > MIN_AREA)
         ]
     )
 
-    objects_rectangles = [cv2.fitEllipse(cnt) for cnt in contours]
+    objects_rectangles = [cv2.minAreaRect(cnt) for cnt in all_contours]
     objects_rectangles = [
         obj
         for obj in objects_rectangles
@@ -284,7 +299,11 @@ def process_frame_detection(fg_frame):
         and (obj[0][0] >= 0)
         and (obj[0][1] >= 0)
     ]
-    # [y, x, axis_long/2, axis_short/2, angle_degree]
+    objects_rectangles = [
+        ([(y, x), (ax1, ax2), r] if ax1 < ax2 else [(y, x), (ax2, ax1), r + 90])
+        for (y, x), (ax1, ax2), r in objects_rectangles
+    ]
+    # [y, x, axis_1/2, axis_2/2, angle_degree]
     objects_intensities = [
         fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_rectangles
     ]
@@ -305,6 +324,39 @@ def process_frame_detection(fg_frame):
     ]
 
     return objects_rectangles
+
+
+def watershed_segmentation(cnt, fg_smooth, fg_mask, fg_maxima_mask):
+    x, y, w, h = cv2.boundingRect(cnt)
+    rect_smooth = fg_smooth[y : y + h, x : x + w]
+    rect_mask = fg_mask[y : y + h, x : x + w]
+    rect_max = fg_maxima_mask[y : y + h, x : x + w]
+    dist = cv2.normalize(
+        cv2.distanceTransform(1 - rect_max, cv2.DIST_L2, 5),
+        None,
+        0,
+        1,
+        cv2.NORM_MINMAX,
+    ) * (np.max(rect_smooth) - rect_smooth)
+
+    _, markers = cv2.connectedComponents(rect_max)
+    markers[markers > 0] = markers[markers > 0] + 1
+    markers[rect_mask == 0] = 1
+    dist = cv2.cvtColor(
+        cv2.normalize(dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8),
+        cv2.COLOR_GRAY2BGR,
+    )
+    markers = cv2.watershed(dist, markers)
+    contours = []
+    for i in np.unique(markers[markers > 1]):
+        cnt, _ = cv2.findContours(
+            (markers == i).astype(np.uint8),
+            cv2.RETR_LIST,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        contours.append(cnt[0])
+    contours = [c + (x, y) for c in contours]
+    return contours
 
 
 def calculate_confidence(properties):
