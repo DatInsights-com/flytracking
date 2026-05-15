@@ -109,7 +109,7 @@ def detect_moving_objects(
     cap_thread.start()
 
     workers = []
-    for id in range(N_WORKERS):
+    for _ in range(N_WORKERS):
         p = Process(
             target=worker_process,
             args=(
@@ -125,7 +125,10 @@ def detect_moving_objects(
         p.start()
         workers.append(p)
 
+    cap_thread.join()
     frame_q.join()
+    for p in workers:
+        p.join()
 
     read_results = shared_memory.SharedMemory(name=results_shared_memory.name)
     results_array = np.ndarray(
