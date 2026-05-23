@@ -1,0 +1,33 @@
+Metadata-Version: 2.4
+Name: fly_tracking
+Version: 1.0.0
+Summary: Module to detect and track flies walking inside an arena.
+Home-page: https://github.com/DatInsights-com/fly_tracking
+Author: Yann S. Dufour
+Author-email: yann.dufour@datinsights.com
+License: MIT
+Keywords: detection tracking science
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Image Recognition
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: opencv-python
+Requires-Dist: ultralytics
+Requires-Dist: plotnine
+Requires-Dist: lap
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: summary
+
+hello

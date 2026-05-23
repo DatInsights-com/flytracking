@@ -1,0 +1,19 @@
+# fly_tracking
+
+**fly_tracking** is a Python module designed to detect and track flies walking inside an arena. It leverages advanced image processing and machine learning techniques to provide accurate detection and tracking capabilities.
+
+## Features
+
+- Fly detection using image segmentation.
+- Tracking of multiple flies within an arena.
+- Connecting tracklets using a global optimization algorithm.
+- Saving data and plotting summaries.
+
+## Installation
+
+You can install `fly_tracking` using pip:
+
+```bash
+git clone https://github.com/DatInsights-com/fly_tracking.git
+cd fly_tracking
+pip install -e .

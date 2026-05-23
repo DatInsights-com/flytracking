@@ -1,0 +1,13 @@
+README
+setup.py
+fly_tracking/__init__.py
+fly_tracking/connect_tracklets.py
+fly_tracking/fly_detection.py
+fly_tracking/fly_tracking.py
+fly_tracking/plotting_tracks.py
+fly_tracking/run_fly_tracker.py
+fly_tracking.egg-info/PKG-INFO
+fly_tracking.egg-info/SOURCES.txt
+fly_tracking.egg-info/dependency_links.txt
+fly_tracking.egg-info/requires.txt
+fly_tracking.egg-info/top_level.txt
