@@ -25,7 +25,7 @@ setup(
         "plotnine",
         "lap",
     ],
-    long_description=read("README"),
+    long_description=read("README.md"),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Environment :: Console",
