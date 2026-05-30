@@ -23,7 +23,7 @@ MIN_RELATIVE_LENGTH = 0.25
 MOVING_AVG_WINDOW = int(6000)
 
 
-matplotlib.use("qtagg")
+matplotlib.use("agg")
 
 
 def load_results_to_df(
