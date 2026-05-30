@@ -24,6 +24,8 @@ def main():
     VIDEO_PATH = sys.argv[1]
     OUT_DIR = sys.argv[2]
 
+    Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
+
     print(VIDEO_PATH)
     print(OUT_DIR)
 
