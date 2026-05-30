@@ -18,12 +18,13 @@ from math import radians, degrees
 import json
 import gzip
 
-N_MAX_OBJS_PER_FRAME = 100
-N_WORKERS = os.cpu_count()
-N_FRAME_QUEUE = N_WORKERS * 20
+N_MAX_OBJS_PER_FRAME = 50
+N_WORKERS = 4
+N_FRAME_QUEUE = N_WORKERS * 100
 
-MIN_INTENSITY = 2
-MIN_AREA = 3
+MIN_INTENSITY = 5
+REL_INTENSITY = 0.3
+MIN_AREA = 2
 GAUSSIAN_STD = 3
 DOG_FACTOR = 1.6  # scaling factor difference of Gaussian
 MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
@@ -93,20 +94,7 @@ def detect_moving_objects(
         b"\x00" * results_shared_memory.size
     )
 
-    frame_q = JoinableQueue(maxsize=N_FRAME_QUEUE)
-
-    cap_thread = threading.Thread(
-        target=capture_worker,
-        args=(
-            video_path,
-            total_frames,
-            bgframe,
-            frames_shared_memory.name,
-            frame_q,
-        ),
-        daemon=True,
-    )
-    cap_thread.start()
+    frame_q = JoinableQueue(maxsize=N_FRAME_QUEUE - N_WORKERS)
 
     workers = []
     for _ in range(N_WORKERS):
@@ -122,11 +110,27 @@ def detect_moving_objects(
             ),
             daemon=True,
         )
-        p.start()
         workers.append(p)
+        p.start()
 
+    cap_thread = threading.Thread(
+        target=capture_worker,
+        args=(
+            video_path,
+            total_frames,
+            bgframe,
+            frames_shared_memory.name,
+            frame_q,
+        ),
+        daemon=True,
+    )
+    cap_thread.start()
     cap_thread.join()
     frame_q.join()
+
+    for _ in range(N_WORKERS):
+        frame_q.put(None)
+
     for p in workers:
         p.join()
 
@@ -157,14 +161,11 @@ def detect_moving_objects(
 def capture_worker(
     video_path, total_frames, bgframe, frames_shared_memory_name, frame_q
 ):
-
     frames_shared_memory = shared_memory.SharedMemory(name=frames_shared_memory_name)
-
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = np.min([cap.get(cv2.CAP_PROP_FRAME_COUNT), total_frames]).astype(int)
-
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     for frame_nb in range(total_frames):
         slot = frame_nb % N_FRAME_QUEUE
@@ -174,24 +175,16 @@ def capture_worker(
             buffer=frames_shared_memory.buf,
             offset=slot * width * height * 4,
         )
-
         ret, frame = cap.read()
         if not ret:
             break
-
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         fg_frame = cv2.subtract(
             bgframe.astype(np.float32), frame_gray.astype(np.float32)
         )
-
-        np.copyto(frame_buffer, fg_frame)
-
         frame_q.put(frame_nb)
+        np.copyto(frame_buffer, fg_frame)
     cap.release()
-
-    for _ in range(N_WORKERS):
-        frame_q.put(None)
-
     frames_shared_memory.close()
 
 
@@ -203,43 +196,37 @@ def worker_process(
     frame_height,
     total_frames,
 ):
-
     frames_shared_memory = shared_memory.SharedMemory(name=frames_shared_memory_name)
     results_shared_memory = shared_memory.SharedMemory(name=results_shared_memory_name)
-
     results_array = np.ndarray(
         (total_frames, N_MAX_OBJS_PER_FRAME, 6),
         dtype=np.float32,
         buffer=results_shared_memory.buf,
     )
-
     while True:
-        frame_nb = frame_q.get()
-        if frame_nb is None:
-            frame_q.task_done()
-            break
-
-        # Get frame data
-        slot = frame_nb % N_FRAME_QUEUE
-        fg_frame = np.ndarray(
-            (frame_height, frame_width),
-            dtype=np.float32,
-            buffer=frames_shared_memory.buf,
-            offset=slot * frame_height * frame_width * 4,
-        )
-
-        objects_rectangles = process_frame_detection(fg_frame)
-
-        count = min(len(objects_rectangles), N_MAX_OBJS_PER_FRAME)
-
-        # objects_rectangles is [x, y, rx, ry, angle, confidence]
-        for i in range(count):
-            results_array[frame_nb, i, :] = np.array(
-                objects_rectangles[i], dtype=np.float32
+        try:
+            frame_nb = frame_q.get()
+            if frame_nb is None:
+                frame_q.task_done()
+                break
+            # Get frame data
+            slot = frame_nb % N_FRAME_QUEUE
+            fg_frame = np.ndarray(
+                (frame_height, frame_width),
+                dtype=np.float32,
+                buffer=frames_shared_memory.buf,
+                offset=slot * frame_height * frame_width * 4,
             )
-
-        frame_q.task_done()
-
+            objects_rectangles = process_frame_detection(fg_frame)
+            # objects_rectangles is [x, y, rx, ry, angle, confidence]
+            if len(objects_rectangles) < N_MAX_OBJS_PER_FRAME:
+                for i in range(len(objects_rectangles)):
+                    results_array[frame_nb, i, :] = np.array(
+                        objects_rectangles[i], dtype=np.float32
+                    )
+        finally:
+            if frame_nb is not None and frame_nb is not False:
+                frame_q.task_done()
     frames_shared_memory.close()
     results_shared_memory.close()
 
@@ -256,7 +243,9 @@ def process_frame_detection(fg_frame):
     )
     fg_dilate_maxima = cv2.dilate(fg_smooth, MORPH_KERNEL)
 
-    fg_mask = (fg_mask > 0) & (fg_smooth > (0.33 * fg_dilate_maxima)).astype(np.uint8)
+    fg_mask = (fg_mask > 0) & (fg_smooth > (REL_INTENSITY * fg_dilate_maxima)).astype(
+        np.uint8
+    )
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, MORPH_KERNEL)
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, MORPH_KERNEL)
 

@@ -2,10 +2,7 @@
 __author__ = "Yann Dufour"
 __version__ = "1.1"
 
-from .fly_detection import *
 from .fly_tracking import *
-from .connect_tracklets import *
-from .plotting_tracks import *
 
 __all__ = [
     "create_background_image",

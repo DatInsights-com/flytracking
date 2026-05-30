@@ -1,7 +1,0 @@
-numpy
-pandas
-scipy
-opencv-python
-ultralytics
-plotnine
-lap

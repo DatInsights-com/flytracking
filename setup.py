@@ -7,8 +7,8 @@ def read(fname):
 
 
 setup(
-    name="fly_tracking",
-    version="1.0.0",
+    name="flytracking",
+    version="1.1.0",
     author="Yann S. Dufour",
     author_email="yann.dufour@datinsights.com",
     description=("Module to detect and track flies walking inside an arena."),

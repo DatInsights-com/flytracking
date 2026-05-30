@@ -1,7 +1,12 @@
-# %%
-from fly_tracking import *
+# Author: Yann Dufour
+# Company: DatInsight, https://datinsights.com/
+# Date: May 7, 2026
+# Version: 1.1
+
+from flytracking import *
 import sys
 import time
+from pathlib import Path
 
 OVERWRITE = True
 GENERATE_VIDEOS = False
@@ -13,7 +18,7 @@ MAX_HISTORY = int(10)
 def main():
 
     if len(sys.argv) != 3:
-        print("Usage: python run_fly_tracker.py video_path output_dir ")
+        print("Usage: python run_fly_tracker.py video_path output_dir")
         sys.exit(1)
 
     VIDEO_PATH = sys.argv[1]

@@ -20,13 +20,12 @@ from ultralytics.trackers.byte_tracker import BYTETracker
 import json
 import gzip
 
-VIDEO_FPS = 20
 TRACKER_TYPE = "bytetrack"
 TRACK_HIGH_THRESH = 0
 TRACK_LOW_THRESH = 0
-NEW_TRACK_THRESH = 0
+NEW_TRACK_THRESH = 0.1
 TRACK_BUFFER = 0
-MATCH_THRESH = 0.999
+MATCH_THRESH = 0.9999
 FUSE_SCORE = True
 
 N_TRACK_COLORS = 16
@@ -96,7 +95,7 @@ def track_moving_objects(
         MATCH_THRESH,
         FUSE_SCORE,
     )
-    tracker = BYTETracker(cfg, frame_rate=VIDEO_FPS)
+    tracker = BYTETracker(cfg)
 
     all_tracked_objects = [[] for _ in range(total_frames)]
     not_tracked_objects = [[] for _ in range(total_frames)]
@@ -117,18 +116,22 @@ def track_moving_objects(
 
             tracked_objects = tracker.update(objects)
 
-            # [x, y, w, h, r, track_id, conf, cls, detect_id]
-            all_tracked_objects[i] = [obj[:7] for obj in tracked_objects.tolist()]
-            dist_objects = cdist(
-                np.array([track[:5] for track in all_tracked_objects[i]]),
-                np.array([det[:5] for det in all_detected_objects[i]]),
-            )
-            ind_track, ind_det = linear_sum_assignment(dist_objects)
-            not_tracked_objects[i] = [
-                all_detected_objects[i][id]
-                for id in range(len(all_detected_objects[i]))
-                if id not in ind_det
-            ]
+            if tracked_objects.ndim == 2:
+                # [x, y, w, h, r, track_id, conf, cls, detect_id]
+                all_tracked_objects[i] = [obj[:7] for obj in tracked_objects.tolist()]
+
+                dist_objects = cdist(
+                    np.array([track[:5] for track in all_tracked_objects[i]]),
+                    np.array([det[:5] for det in all_detected_objects[i]]),
+                )
+                ind_track, ind_det = linear_sum_assignment(dist_objects)
+                not_tracked_objects[i] = [
+                    all_detected_objects[i][id]
+                    for id in range(len(all_detected_objects[i]))
+                    if id not in ind_det
+                ]
+            else:
+                not_tracked_objects[i] = all_detected_objects[i]
 
     with gzip.open(TRACKING_FILE, "wt") as f:
         json.dump(all_tracked_objects, f)

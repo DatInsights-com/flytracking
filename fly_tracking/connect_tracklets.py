@@ -19,13 +19,13 @@ from collections import deque
 import json
 import gzip
 
-PROB_NO_DETECTION = 1e-3
-PROB_DOUBLE_DETECTION = 1e-4
+PROB_NO_DETECTION = 1e-2
+PROB_DOUBLE_DETECTION = 1e-3
 T_DIST_DF = 11
 MIN_PROB_THRESH = 0
-MIN_OBJECT_CONFIDENCE = 0.25
-
-N_TRACK_COLORS = 16
+MIN_OBJECT_CONFIDENCE = 0.2
+N_TRACK_COLORS = 15
+N_TOP_PATH = 50
 
 
 def connect_tracklets(
@@ -48,16 +48,19 @@ def connect_tracklets(
         leftover_objects = json.load(f)
 
     all_tracked_df = linear_interpolate_tracklets(all_tracked_objects)
+    all_tracked_df = all_tracked_df.dropna(subset=["x", "y"])
+
+    diff_xy = all_tracked_df.groupby("tracklet_id").diff()[["x", "y", "frame"]].dropna()
 
     estimated_diffusion_coeff = (
         np.nanmean(
             np.square(
                 np.linalg.norm(
-                    all_tracked_df.groupby("tracklet_id").diff()[["x", "y"]].values,
+                    diff_xy[["x", "y"]].values.astype(np.float64),
                     axis=1,
                 )
             )
-            / all_tracked_df.groupby("tracklet_id").diff()["frame"].values
+            / diff_xy["frame"].values.astype(np.float64)
         )
         / 4
     )
@@ -74,7 +77,9 @@ def connect_tracklets(
         PROB_DOUBLE_DETECTION,
         T_DIST_DF,
         MIN_PROB_THRESH,
+        N_TOP_PATH,
     )
+
     all_tracked_relabeled = relabel_tracklets_with_paths(all_tracked_df, shortest_paths)
     all_relabeled_list = [[] for _ in range(total_frames)]
     for frame in range(total_frames):
@@ -133,23 +138,26 @@ def linear_interpolate_tracklets(all_tracked_objects):
         list_df.append(objects)
 
     objects_df = pd.concat(list_df, ignore_index=True)
-    objects_df["frame"] = objects_df["frame"].astype("int")
-    objects_df["tracklet_id"] = objects_df["tracklet_id"].astype("int")
+    objects_df["frame"] = objects_df["frame"].astype(np.int64)
+    objects_df["tracklet_id"] = objects_df["tracklet_id"].astype(np.int64)
 
     all_tracks = []
     tracklet_id = objects_df["tracklet_id"].unique()
     for id in tracklet_id:
-        tracks = objects_df.loc[objects_df["tracklet_id"] == id]
-        tracks.index = tracks["frame"]
-        if len(tracks) > 1:
-            tracks = tracks.reindex(
-                np.arange(tracks["frame"].min(), tracks["frame"].max() + 1),
+        track = objects_df.loc[objects_df["tracklet_id"] == id]
+        track.index = track["frame"]
+        if len(track) > 1:
+            track = track.reindex(
+                np.arange(track["frame"].min(), track["frame"].max() + 1),
                 fill_value=np.nan,
-            ).interpolate()
-        all_tracks.append(tracks)
+            )
+            s = track.select_dtypes(include="object").columns
+            track[s] = track[s].astype(np.float64)
+            track = track.interpolate()
+        all_tracks.append(track)
     interpolated_df = pd.concat(all_tracks, ignore_index=True)
-    interpolated_df["tracklet_id"] = interpolated_df["tracklet_id"].astype("int")
-    interpolated_df["frame"] = interpolated_df["frame"].astype("int")
+    interpolated_df["tracklet_id"] = interpolated_df["tracklet_id"].astype(np.int64)
+    interpolated_df["frame"] = interpolated_df["frame"].astype(np.int64)
     return interpolated_df
 
 
@@ -170,7 +178,7 @@ def relabel_tracklets_with_paths(data, paths):
 
 
 def find_shortest_paths(
-    data, diff_coeff, prob_no_detection, prob_double_detection, df, min_prob
+    data, diff_coeff, prob_no_detection, prob_double_detection, df, min_prob, n_top
 ):
 
     tracklets_id = data["tracklet_id"].unique().tolist()
@@ -190,7 +198,7 @@ def find_shortest_paths(
         mask[:, -1] = False
         dist_graph[mask] = 0
 
-    while True:
+    while len(shortest_costs) < n_top:
         dist_matrix, predecessors = shortest_path(
             dist_graph, return_predecessors=True, directed=True
         )
@@ -211,10 +219,8 @@ def find_shortest_paths(
             break
         shortest_paths.append(path[1:-1])
         shortest_costs.append(dist_matrix[idx1, idx2])
-        dist_graph = np.ascontiguousarray(
-            np.delete(np.delete(dist_graph, nodes[1:-1], axis=0), nodes[1:-1], axis=1)
-        )
-        tracks = [x for x in tracks if x not in path[1:-1]]
+        dist_graph[nodes[1:-1], :] = 0
+        dist_graph[:, nodes[1:-1]] = 0
 
     return (shortest_paths, shortest_costs)
 
