@@ -14,7 +14,7 @@ setup(
     description=("Module to detect and track flies walking inside an arena."),
     license="MIT",
     keywords="detection tracking science",
-    url="https://github.com/DatInsights-com/fly_tracking",
+    url="https://github.com/DatInsights-com/flytracking",
     packages=["fly_tracking"],
     install_requires=[
         "numpy",
