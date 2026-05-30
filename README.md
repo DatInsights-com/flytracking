@@ -14,7 +14,7 @@
 Clone the repository and install the package:
 
 ```bash
-git clone https://github.com/DatInsights-com/fly_tracking.git
+git clone https://github.com/DatInsights-com/flytracking.git
 cd flytracking
 pip install .
 ```
