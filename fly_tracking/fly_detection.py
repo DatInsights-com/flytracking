@@ -43,12 +43,12 @@ def create_background_image(
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = np.min([cap.get(cv2.CAP_PROP_FRAME_COUNT), total_frames]).astype(int)
+    nb_frames = np.min(nb_frames, total_frames)
 
     stride = int(np.max([1, total_frames / nb_frames]))
     background = np.zeros((height, width), dtype=np.float32)
 
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     for i in range(nb_frames):
         cap.set(cv2.CAP_PROP_POS_FRAMES, i * stride)
         ret, frame = cap.read()
