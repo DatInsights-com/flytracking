@@ -44,7 +44,7 @@ def create_background_image(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = np.min([cap.get(cv2.CAP_PROP_FRAME_COUNT), total_frames]).astype(int)
-    nb_frames = np.min(nb_frames, total_frames)
+    nb_frames = np.min([nb_frames, total_frames])
 
     stride = int(np.max([1, total_frames / nb_frames]))
     background = np.zeros((height, width), dtype=np.float32)
