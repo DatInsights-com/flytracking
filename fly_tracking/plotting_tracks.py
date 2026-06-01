@@ -19,8 +19,8 @@ MAX_REL_PERIOD_MSD = 0.5
 TIME_RESOLUTION_VAC = int(2)
 MAX_REL_PERIOD_VAC = 0.1
 
-MIN_RELATIVE_LENGTH = 0.25
-MOVING_AVG_WINDOW = int(6000)
+MIN_RELATIVE_LENGTH = 0.50
+MOVING_AVG_WINDOW = int(600)
 
 
 matplotlib.use("agg")
@@ -99,9 +99,7 @@ def load_results_to_df(
     results["diff_y"] = (
         -results.groupby("temp_id")["y"].diff(periods=-1) / results["diff_frame"]
     )
-    results["diff_xy"] = np.sqrt(
-        np.square(results["diff_x"]) + np.square(results["diff_y"])
-    )
+    results["diff_xy"] = (results["diff_x"] ** 2 + results["diff_y"] ** 2) ** 0.5
     results["diff_orientation"] = (
         -results.groupby("temp_id")["orientation"].diff(periods=-1)
         / results["diff_frame"]
@@ -113,63 +111,33 @@ def load_results_to_df(
         -results.groupby("temp_id")["axis_2"].diff(periods=-1) / results["diff_frame"]
     )
 
-    results["cumul_dist"] = np.sqrt(
-        np.square(results.groupby("temp_id")["x"].diff())
-        + np.square(results.groupby("temp_id")["y"].diff())
-    )
+    results["cumul_dist"] = (
+        (
+            (results.groupby("temp_id")["x"].diff()) ** 2
+            + (results.groupby("temp_id")["y"].diff()) ** 2
+        )
+        ** 0.5
+    ).astype("float")
     results["cumul_dist"] = results.groupby("temp_id")["cumul_dist"].cumsum()
 
     results = results.drop("temp_id", axis=1)
     return results
 
 
-def calculate_msd_lontracks(video_path: str, out_dir: str):
-
-    video_name = os.path.basename(video_path).split(".")[0]
-
-    json_file = f"{out_dir}/{video_name}_longtracks.json.gz"
-    with gzip.open(json_file, "rt") as f:
-        data_list = json.load(f)
-
-    columns = [
-        "x",
-        "y",
-        "axis_1",
-        "axis_2",
-        "orientation",
-        "tracklet_id",
-        "confidence",
-        "frame",
-        "track_id",
-    ]
-
-    list_df = []
-    for i, frame in enumerate(data_list):
-        objects = pd.DataFrame(
-            frame,
-            columns=columns,
-        )
-        objects["frame"] = i
-        list_df.append(objects)
-
-    results = pd.concat(list_df, ignore_index=True)
-    results["frame"] = results["frame"].astype("int")
-    results["track_id"] = results["track_id"].astype("int")
+def calculate_msd_lontracks(data):
 
     calculations = pd.DataFrame(
         product(
-            results["track_id"].unique(),
-            range(
-                0, int(MAX_REL_PERIOD_MSD * max(results["frame"])), TIME_RESOLUTION_MSD
-            ),
+            data["track_id"].unique(),
+            range(0, int(MAX_REL_PERIOD_MSD * max(data["frame"])), TIME_RESOLUTION_MSD),
         ),
         columns=["track_id", "period"],
     )
     calculations["msd"] = np.nan
 
-    for id in results["track_id"].unique():
-        data = results.loc[results["track_id"] == id]
-        data = data.sort_values(["frame"])
+    for id in data["track_id"].unique():
+        track_data = data.loc[data["track_id"] == id]
+        track_data = track_data.sort_values(["frame"])
         calculations.loc[
             (calculations["track_id"] == id) & (calculations["period"] == 0), "msd"
         ] = 0
@@ -177,11 +145,14 @@ def calculate_msd_lontracks(video_path: str, out_dir: str):
         for p in range(
             TIME_RESOLUTION_MSD,
             min(
-                calculations["period"].max(), data["frame"].max() - data["frame"].min()
+                calculations["period"].max(),
+                track_data["frame"].max() - track_data["frame"].min(),
             ),
             TIME_RESOLUTION_MSD,
         ):
-            msd = data["x"].diff(periods=p).pow(2) + data["y"].diff(periods=p).pow(2)
+            msd = track_data["x"].diff(periods=p).pow(2) + track_data["y"].diff(
+                periods=p
+            ).pow(2)
             calculations.loc[
                 (calculations["track_id"] == id) & (calculations["period"] == p), "msd"
             ] = msd.mean()
@@ -189,47 +160,16 @@ def calculate_msd_lontracks(video_path: str, out_dir: str):
     return calculations
 
 
-def calculate_vac_lontracks(video_path: str, out_dir: str):
-
-    video_name = os.path.basename(video_path).split(".")[0]
-
-    json_file = f"{out_dir}/{video_name}_longtracks.json.gz"
-    with gzip.open(json_file, "rt") as f:
-        data_list = json.load(f)
-
-    columns = [
-        "x",
-        "y",
-        "axis_1",
-        "axis_2",
-        "orientation",
-        "tracklet_id",
-        "confidence",
-        "frame",
-        "track_id",
-    ]
-
-    list_df = []
-    for i, frame in enumerate(data_list):
-        objects = pd.DataFrame(
-            frame,
-            columns=columns,
-        )
-        objects["frame"] = i
-        list_df.append(objects)
-
-    results = pd.concat(list_df, ignore_index=True)
-    results["frame"] = results["frame"].astype("int")
-    results["track_id"] = results["track_id"].astype("int")
+def calculate_vac_lontracks(data):
 
     calculations = pd.DataFrame(
         product(
-            results["track_id"].unique(),
+            data["track_id"].unique(),
             range(
                 0,
                 int(
                     np.power(
-                        MAX_REL_PERIOD_VAC * results["frame"].max(),
+                        MAX_REL_PERIOD_VAC * data["frame"].max(),
                         1 / TIME_RESOLUTION_VAC,
                     )
                 ),
@@ -240,24 +180,26 @@ def calculate_vac_lontracks(video_path: str, out_dir: str):
     calculations["period"] = calculations["period"].pow(TIME_RESOLUTION_VAC)
     calculations["vac"] = np.nan
 
-    for id in results["track_id"].unique():
-        data = results.loc[results["track_id"] == id]
-        data = data.sort_values(["frame"])
+    for id in data["track_id"].unique():
+        track_data = data.loc[data["track_id"] == id]
+        track_data = track_data.sort_values(["frame"])
         calculations.loc[
             (calculations["track_id"] == id) & (calculations["period"] == 0), "vac"
         ] = 1
 
-        dx = data["x"].diff()
-        dy = data["y"].diff()
+        dx = track_data["x"].diff().to_numpy(dtype="float64")
+        dy = track_data["y"].diff().to_numpy(dtype="float64")
         velocity = np.array([dx, dy]).T
 
-        speed_squared = (dx.pow(2) + dy.pow(2)) / data["frame"].diff().pow(2)
-        speed_squared = speed_squared.mean()
+        speed_squared = (np.square(dx) + np.square(dy)) / np.square(
+            track_data["frame"].diff().to_numpy()
+        )
+        speed_squared = np.nanmean(speed_squared)
 
         periods = [
             p
             for p in calculations["period"].unique()
-            if (p <= (max(data["frame"]) - min(data["frame"])) and (p > 0))
+            if (p <= (max(track_data["frame"]) - min(track_data["frame"])) and (p > 0))
         ]
 
         for p in periods:
@@ -274,7 +216,6 @@ def calculate_vac_lontracks(video_path: str, out_dir: str):
 
 
 def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
-
     video_name = os.path.basename(video_path).split(".")[0]
 
     TRACKING_PLOTS = f"{out_dir}/{video_name}_longtracks_traces.png"
@@ -369,20 +310,14 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         + pn.aes(x="track_id", y="axis_2", fill="track_id")
         + pn.geom_violin(width=1, size=0.1)
     )
-
-    data_msd = calculate_msd_lontracks(video_path, out_dir)
-    data_msd = data_msd.loc[np.isin(data_msd["track_id"], top_track_ids)]
-    data_msd["track_id"] = data_msd["track_id"].astype("category")
+    data_msd = calculate_msd_lontracks(data)
 
     p10 = (
         pn.ggplot(data_msd)
         + pn.aes(x="period", y="msd", color="track_id")
         + pn.geom_line(size=0.5)
     )
-
-    data_vac = calculate_vac_lontracks(video_path, out_dir)
-    data_vac = data_vac.loc[np.isin(data_vac["track_id"], top_track_ids)]
-    data_vac["track_id"] = data_vac["track_id"].astype("category")
+    data_vac = calculate_vac_lontracks(data)
 
     p11 = (
         pn.ggplot(data_vac)
@@ -396,6 +331,5 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         & pn.theme_minimal()
         & pn.theme(figure_size=(8.268, 11.693), legend_position="none")
     )
-
     p1.save(TRACKING_PLOTS, width=8.268, height=11.693, dpi=600, verbose=False)
     plot.save(SUMMARY_PLOTS, dpi=600, verbose=False)

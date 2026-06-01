@@ -388,7 +388,7 @@ def save_longtracks_movie(
                 (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
-            color = colors_bgr[track_id % 16]
+            color = colors_bgr[track_id % N_TRACK_COLORS]
             frame_tracking = cv2.ellipse(
                 frame_tracking,
                 coords,

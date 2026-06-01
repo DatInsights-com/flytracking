@@ -28,7 +28,7 @@ TRACK_BUFFER = 0
 MATCH_THRESH = 0.9999
 FUSE_SCORE = True
 
-N_TRACK_COLORS = 16
+N_TRACK_COLORS = 15
 
 
 class Tracker_cfg:
@@ -205,7 +205,7 @@ def save_tracking_movie(
                 (track[2] / 2, track[3] / 2),
                 degrees(track[4]),
             )
-            color = colors_bgr[track_id % 16]
+            color = colors_bgr[track_id % N_TRACK_COLORS]
             frame_tracking = cv2.ellipse(
                 frame_tracking,
                 coords,

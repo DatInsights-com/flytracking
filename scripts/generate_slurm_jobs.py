@@ -27,8 +27,8 @@ def generate_slurm_job(
     script_content.append(f"#SBATCH --mem={memory}GB")
     script_content.append(f"#SBATCH --time={time}:00:00")
     script_content.append(f"#SBATCH --partition={partition}")
-    script_content.append("#SBATCH --output=logs/%x_%j_%n.out")
-    script_content.append("#SBATCH --error=logs/%x_%j_%n.err")
+    script_content.append("#SBATCH --output=logs/%x_%j.out")
+    script_content.append("#SBATCH --error=logs/%x_%j.err")
     script_content.append("")
 
     script_content.append("module purge")
