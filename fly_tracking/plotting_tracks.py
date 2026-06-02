@@ -14,13 +14,13 @@ import plotnine as pn
 from itertools import product
 
 TIME_RESOLUTION_MSD = int(20)
-MAX_REL_PERIOD_MSD = 0.5
+MAX_REL_PERIOD_MSD = 0.25
 
 TIME_RESOLUTION_VAC = int(2)
 MAX_REL_PERIOD_VAC = 0.1
 
-MIN_RELATIVE_LENGTH = 0.50
-MOVING_AVG_WINDOW = int(600)
+MIN_RELATIVE_LENGTH = 0.25
+MOVING_AVG_WINDOW = int(1200)
 
 
 matplotlib.use("agg")
@@ -75,20 +75,17 @@ def load_results_to_df(
 
     list_df = []
     for i, frame in enumerate(data_list):
-        objects = pd.DataFrame(
-            frame,
-            columns=columns,
-        )
+        objects = pd.DataFrame(frame, columns=columns, dtype=np.float64)
         objects["frame"] = i
         list_df.append(objects)
 
     results = pd.concat(list_df, ignore_index=True)
-    results["frame"] = results["frame"].astype("int")
+    results["frame"] = results["frame"].astype(np.int32)
     if "tracklet_id" in results.columns:
-        results["tracklet_id"] = results["tracklet_id"].astype("int")
+        results["tracklet_id"] = results["tracklet_id"].astype(np.int32)
         results["temp_id"] = results["tracklet_id"]
     if "track_id" in results.columns:
-        results["track_id"] = results["track_id"].astype("int")
+        results["track_id"] = results["track_id"].astype(np.int32)
         results["temp_id"] = results["track_id"]
 
     results = results.sort_values(["temp_id", "frame"])
@@ -117,7 +114,7 @@ def load_results_to_df(
             + (results.groupby("temp_id")["y"].diff()) ** 2
         )
         ** 0.5
-    ).astype("float")
+    ).astype(np.float64)
     results["cumul_dist"] = results.groupby("temp_id")["cumul_dist"].cumsum()
 
     results = results.drop("temp_id", axis=1)
@@ -157,6 +154,7 @@ def calculate_msd_lontracks(data):
                 (calculations["track_id"] == id) & (calculations["period"] == p), "msd"
             ] = msd.mean()
 
+    calculations["track_id"] = calculations["track_id"].astype("category")
     return calculations
 
 
@@ -212,6 +210,7 @@ def calculate_vac_lontracks(data):
                     np.nanmean(vac) / speed_squared
                 )
 
+    calculations["track_id"] = calculations["track_id"].astype("category")
     return calculations
 
 
@@ -290,7 +289,7 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         pn.ggplot(data)
         + pn.aes(x="track_id", y="diff_xy", fill="track_id")
         + pn.geom_violin(width=1.5, size=0.1)
-        + pn.scale_y_sqrt()
+        + pn.scale_y_continuous(limits=[0, 25], trans="sqrt")
     )
 
     p7 = (
@@ -331,5 +330,6 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         & pn.theme_minimal()
         & pn.theme(figure_size=(8.268, 11.693), legend_position="none")
     )
+
     p1.save(TRACKING_PLOTS, width=8.268, height=11.693, dpi=600, verbose=False)
     plot.save(SUMMARY_PLOTS, dpi=600, verbose=False)

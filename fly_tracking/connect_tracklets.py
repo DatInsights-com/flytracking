@@ -105,6 +105,7 @@ def detection_to_tracklets_df(detected_objects, id, min_confidence):
                 "orientation",
                 "confidence",
             ],
+            dtype=np.float64,
         )
         objects["frame"] = i
         list_df.append(objects)
@@ -133,6 +134,7 @@ def linear_interpolate_tracklets(all_tracked_objects):
                 "tracklet_id",
                 "confidence",
             ],
+            dtype=np.float64,
         )
         objects["frame"] = i
         list_df.append(objects)
