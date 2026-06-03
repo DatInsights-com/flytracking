@@ -260,12 +260,14 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
             data=data.loc[data["diff_frame"] > 1],
         )
     )
-
-    p3 = (
-        pn.ggplot(data.loc[data["diff_frame"] > 1])
-        + pn.aes(x="track_id", y="diff_frame", color="track_id")
-        + pn.geom_sina()
-    )
+    if (data.loc[data["diff_frame"] > 1]).empty:
+        p3 = pn.ggplot() + pn.geom_blank()
+    else:
+        p3 = (
+            pn.ggplot(data.loc[data["diff_frame"] > 1])
+            + pn.aes(x="track_id", y="diff_frame", color="track_id")
+            + pn.geom_sina()
+        )
 
     p4 = (
         pn.ggplot(data)
