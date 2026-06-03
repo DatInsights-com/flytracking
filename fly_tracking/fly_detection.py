@@ -365,8 +365,12 @@ def np_mahalanobis_distance2(properties):
     mu = np.mean(properties, axis=0, keepdims=False)
     M = properties - mu
     cov = 1.0 / (properties.shape[0] - 1) * np.dot(M.T, M)
-    X_mu_SInv = np.dot(M, np.linalg.inv(cov))
-    return np.sum(X_mu_SInv * M, axis=1)
+    if np.linalg.det(cov) != 0:
+        X_mu_SInv = np.dot(M, np.linalg.inv(cov))
+        distances = np.sum(X_mu_SInv * M, axis=1)
+    else:
+        distances = np.ones(M.shape[0])
+    return distances
 
 
 def save_detection_movie(
