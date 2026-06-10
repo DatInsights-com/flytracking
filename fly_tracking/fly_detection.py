@@ -69,7 +69,8 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
     hole_pattern_offset = np.array(hole_pattern.shape) / 2
 
     bg_img = cv2.imread(bg_path, cv2.IMREAD_GRAYSCALE)
-    bg_img_corner = bg_img[1536:, 1536:]
+    bg_w, bg_h = bg_img.shape
+    bg_img_corner = bg_img[int(bg_w * 0.75) :, int(bg_h * 0.75) :]
 
     res_1 = np.max(cv2.matchTemplate(bg_img_corner, tag_1, cv2.TM_CCOEFF_NORMED))
     res_2 = np.max(cv2.matchTemplate(bg_img_corner, tag_2, cv2.TM_CCOEFF_NORMED))
@@ -90,13 +91,29 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
         cv2.CHAIN_APPROX_SIMPLE,
     )
     objects_circles = [cv2.minEnclosingCircle(cnt) for cnt in contours]
-    objects_intensities = [holes[int(b), int(a)] for (a, b), _ in objects_circles]
-    intensity_6 = sorted(objects_intensities, reverse=True)[5]
+    objects_circles = [
+        ((a, b), r)
+        for ((a, b), r) in objects_circles
+        if np.abs(
+            np.sqrt(
+                (
+                    np.square(a + hole_pattern_offset[0] - (bg_w / 2))
+                    + np.square(b + hole_pattern_offset[1] - (bg_h / 2))
+                )
+            )
+            - 567
+        )
+        < 100
+    ]
+    objects_intensities = np.array(
+        [holes[int(b), int(a)] for (a, b), _ in objects_circles]
+    )
+    rank_intensities = np.argsort(-objects_intensities)[:6].tolist()
 
     objects_circles = [
         ((a + hole_pattern_offset[0], b + hole_pattern_offset[1]), r)
         for i, ((a, b), r) in enumerate(objects_circles)
-        if objects_intensities[i] >= intensity_6
+        if i in rank_intensities
     ]
 
     holes_coords = np.expand_dims(
