@@ -34,6 +34,11 @@ def main():
     create_background_image(VIDEO_PATH, OUT_DIR, NB_BG_FRAMES, TOTAL_FRAMES, OVERWRITE)
     print("%s s" % int(time.time() - start_time))
 
+    print("registering background ... ", end="", flush=True)
+    start_time = time.time()
+    register_background_coordinates(VIDEO_PATH, OUT_DIR, OVERWRITE)
+    print("%s s" % int(time.time() - start_time))
+
     print("detecting flies ... ", end="", flush=True)
     start_time = time.time()
     detect_moving_objects(VIDEO_PATH, OUT_DIR, TOTAL_FRAMES, OVERWRITE)

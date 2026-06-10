@@ -29,6 +29,131 @@ GAUSSIAN_STD = 3
 DOG_FACTOR = 1.6  # scaling factor difference of Gaussian
 MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
 
+TAG_1_FILE = "flytracking/patterns/tag_1.png"
+TAG_2_FILE = "flytracking/patterns/tag_2.png"
+HOLE_PATTERN_FILE = "flytracking/patterns/hole_pattern.png"
+HOLE_LABELS = [6, 1, 2, 3, 4, 5]
+
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return (rho, phi)
+
+
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return (x, y)
+
+
+def register_background_coordinates(video_path: str, out_dir: str, overwrite: bool):
+    video_name = os.path.basename(video_path).split(".")[0]
+
+    BACKGROUND_FILE = f"{out_dir}/{video_name}_background_registered.png"
+    COORDINATES_FILE = f"{out_dir}/{video_name}_coordinates.json.gz"
+
+    if (
+        os.path.exists(BACKGROUND_FILE)
+        and os.path.exists(COORDINATES_FILE)
+        and (not overwrite)
+    ):
+        return
+
+    coordinates = {}
+
+    bg_path = f"{out_dir}/{video_name}_background.png"
+    tag_1 = cv2.imread(TAG_1_FILE, cv2.IMREAD_GRAYSCALE)
+    tag_2 = cv2.imread(TAG_2_FILE, cv2.IMREAD_GRAYSCALE)
+    hole_pattern = cv2.imread(HOLE_PATTERN_FILE, cv2.IMREAD_GRAYSCALE)
+    hole_pattern_offset = np.array(hole_pattern.shape) / 2
+
+    bg_img = cv2.imread(bg_path, cv2.IMREAD_GRAYSCALE)
+    bg_img_corner = bg_img[1536:, 1536:]
+
+    res_1 = np.max(cv2.matchTemplate(bg_img_corner, tag_1, cv2.TM_CCOEFF_NORMED))
+    res_2 = np.max(cv2.matchTemplate(bg_img_corner, tag_2, cv2.TM_CCOEFF_NORMED))
+
+    if res_1 > res_2:
+        plate = 1
+    else:
+        plate = 2
+
+    coordinates.update({"plate_id": plate})
+
+    holes = cv2.matchTemplate(bg_img, hole_pattern, cv2.TM_CCOEFF_NORMED)
+    holes[holes < 0.25] = 0
+    holes = (holes * 255).astype(np.uint8)
+    contours, _ = cv2.findContours(
+        holes,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    objects_circles = [cv2.minEnclosingCircle(cnt) for cnt in contours]
+    objects_intensities = [holes[int(b), int(a)] for (a, b), _ in objects_circles]
+    intensity_6 = sorted(objects_intensities, reverse=True)[5]
+
+    objects_circles = [
+        ((a + hole_pattern_offset[0], b + hole_pattern_offset[1]), r)
+        for i, ((a, b), r) in enumerate(objects_circles)
+        if objects_intensities[i] >= intensity_6
+    ]
+
+    holes_coords = np.expand_dims(
+        np.array(
+            [(a, b) for ((a, b), r) in objects_circles],
+            dtype=np.float32,
+        ),
+        1,
+    )
+    e = cv2.fitEllipse(holes_coords)
+    coordinates.update({"ellipse_holes": e})
+
+    pol_coords = [
+        cart2pol(
+            a - e[0][0],
+            b - e[0][1],
+        )
+        for ((a, b), r) in objects_circles
+    ]
+    ind_phi = np.argsort(np.array(pol_coords)[:, 1]).argsort()
+
+    bg_img_overlay = bg_img
+    cv2.putText(
+        bg_img_overlay,
+        "plate: " + str(plate),
+        [1700, 100],
+        cv2.FONT_HERSHEY_SIMPLEX,
+        2,
+        (0, 0, 0),
+        2,
+    )
+    cv2.ellipse(bg_img_overlay, e, (0, 200, 0), 2)
+    cv2.circle(bg_img_overlay, np.array(e[0], dtype=np.int32), 10, (0, 200, 0), 2)
+
+    for i, c in enumerate(objects_circles):
+        coordinates.update({"hole_" + str(HOLE_LABELS[ind_phi[i]]): c[0]})
+        cv2.circle(
+            bg_img_overlay,
+            np.array(c[0], dtype=np.int32),
+            20,
+            [50, 50, 50],
+            -1,
+        )
+        cv2.putText(
+            bg_img_overlay,
+            str(HOLE_LABELS[ind_phi[i]]),
+            np.array(c[0], dtype=np.int32) + [-15, -35],
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.5,
+            (0, 0, 0),
+            2,
+        )
+
+    cv2.imwrite(BACKGROUND_FILE, bg_img_overlay)
+    with gzip.open(COORDINATES_FILE, "wt") as f:
+        json.dump(coordinates, f)
+
 
 def create_background_image(
     video_path: str, out_dir: str, nb_frames: int, total_frames: int, overwrite: bool
