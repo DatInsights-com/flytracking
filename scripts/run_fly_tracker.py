@@ -72,6 +72,11 @@ def main():
         save_longtracks_movie(VIDEO_PATH, OUT_DIR, TOTAL_FRAMES, MAX_HISTORY, OVERWRITE)
         print("%s s" % int(time.time() - start_time))
 
+    print("processing tracks to dataframe ... ", end="", flush=True)
+    start_time = time.time()
+    tracks_to_dataframe(VIDEO_PATH, OUT_DIR, OVERWRITE)
+    print("%s s" % int(time.time() - start_time))
+
     print("generating summary plots ... ", end="", flush=True)
     start_time = time.time()
     plot_longtracks_summary(VIDEO_PATH, OUT_DIR, OVERWRITE)

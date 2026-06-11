@@ -7,6 +7,7 @@ from .fly_tracking import *
 __all__ = [
     "create_background_image",
     "register_background_coordinates",
+    "tracks_to_dataframe",
     "detect_moving_objects",
     "save_detection_movie",
     "track_moving_objects",

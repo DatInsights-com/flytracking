@@ -22,6 +22,8 @@ MAX_REL_PERIOD_VAC = 0.1
 MIN_RELATIVE_LENGTH = 0.25
 MOVING_AVG_WINDOW = int(1200)
 
+PIXEL_SIZE = 0.1975  # mm/px
+FRAME_DURATION = 1 / 20  # seconds
 
 matplotlib.use("agg")
 
@@ -335,3 +337,179 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
 
     p1.save(TRACKING_PLOTS, width=8.268, height=11.693, dpi=600, verbose=False)
     plot.save(SUMMARY_PLOTS, dpi=600, verbose=False)
+
+
+def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
+    video_name = os.path.basename(video_path).split(".")[0]
+
+    DATAFRAME_FILE = f"{out_dir}/{video_name}_dataframe.json.gz"
+    if os.path.exists(DATAFRAME_FILE) and (not overwrite):
+        return
+
+    json_file = f"{out_dir}/{video_name}_longtracks.json.gz"
+    coordinates_file = f"{out_dir}/{video_name}_coordinates.json.gz"
+
+    with gzip.open(json_file, "rt") as f:
+        data_list = json.load(f)
+
+    with gzip.open(coordinates_file, "rt") as f:
+        coordinates = json.load(f)
+
+    parts = out_dir.split("/")
+    exp_name = parts[-2]
+    group_name = parts[-1]
+    rep_name = (
+        video_name.replace("2_butanone", "2-butanone")
+        .replace("mineral_oil", "mineral-oil")
+        .split("_")
+    )
+
+    coord_center = coordinates["ellipse_holes"][0]
+    coord_odor = (
+        np.array(coordinates["hole_" + rep_name[3]]) - np.array(coord_center)
+    ) * PIXEL_SIZE
+
+    cos_rot = coord_odor[0] / np.linalg.norm(coord_odor)
+    sin_rot = -coord_odor[1] / np.linalg.norm(coord_odor)
+    odor_rot = np.atan2(-coord_odor[1], coord_odor[0])
+
+    coord_odor = np.array([np.linalg.norm(coord_odor), 0])
+
+    columns = [
+        "x",
+        "y",
+        "axis_1",
+        "axis_2",
+        "orientation",
+        "tracklet_id",
+        "confidence",
+        "frame",
+        "track_id",
+    ]
+
+    list_df = []
+    for i, frame in enumerate(data_list):
+        objects = pd.DataFrame(frame, columns=columns, dtype=np.float64)
+        objects = objects.drop("tracklet_id", axis=1)
+        objects["frame"] = i
+        list_df.append(objects)
+
+    tracks = pd.concat(list_df, ignore_index=True)
+    tracks["x"] = (tracks["x"] - coord_center[0]) * PIXEL_SIZE
+    tracks["y"] = (tracks["y"] - coord_center[1]) * PIXEL_SIZE
+
+    tracks["x_rot"] = (tracks["x"] * cos_rot) - (tracks["y"] * sin_rot)
+    tracks["y"] = (tracks["x"] * sin_rot) + (tracks["y"] * cos_rot)
+    tracks["x"] = tracks["x_rot"]
+    tracks.drop("x_rot", axis=1)
+    tracks["orientation"] = tracks["orientation"] + odor_rot
+
+    tracks["axis_1"] = tracks["axis_1"] * PIXEL_SIZE
+    tracks["axis_2"] = tracks["axis_2"] * PIXEL_SIZE
+    tracks["frame"] = tracks["frame"].astype(np.int32)
+    tracks["track_id"] = tracks["track_id"].astype(np.int32)
+    tracks["time"] = tracks["frame"] * FRAME_DURATION
+
+    tracks = tracks.sort_values(["track_id", "frame"])
+    tracks["diff_time"] = -tracks.groupby("track_id")["time"].diff(periods=-1)
+    tracks["diff_x"] = (
+        -tracks.groupby("track_id")["x"].diff(periods=-1) / tracks["diff_time"]
+    )
+    tracks["diff_y"] = (
+        -tracks.groupby("track_id")["y"].diff(periods=-1) / tracks["diff_time"]
+    )
+    tracks["speed"] = (tracks["diff_x"] ** 2 + tracks["diff_y"] ** 2) ** 0.5
+    tracks["diff_orientation"] = (
+        -tracks.groupby("track_id")["orientation"].diff(periods=-1)
+        / tracks["diff_time"]
+    )
+    tracks["diff_axis_1"] = (
+        -tracks.groupby("track_id")["axis_1"].diff(periods=-1) / tracks["diff_time"]
+    )
+    tracks["diff_axis_2"] = (
+        -tracks.groupby("track_id")["axis_2"].diff(periods=-1) / tracks["diff_time"]
+    )
+    tracks = tracks.drop("diff_time", axis=1)
+
+    all_tracks = []
+    track_ids = tracks["track_id"].unique()
+
+    for id in track_ids:
+        track = tracks.loc[tracks["track_id"] == id]
+        track.index = track["frame"]
+        if len(track) > 1:
+            track = track.reindex(
+                np.arange(track["frame"].min(), track["frame"].max() + 1),
+                fill_value=np.nan,
+            )
+            track["missing"] = track["x"].isna()
+            track = track.interpolate()
+            track.loc[track["missing"] == True, "confidence"] = np.nan
+        all_tracks.append(track)
+
+    tracks = pd.concat(all_tracks, ignore_index=True)
+    tracks["track_id"] = tracks["track_id"].astype(np.int64)
+    tracks["frame"] = tracks["frame"].astype(np.int64)
+
+    tracks["exp_name"] = exp_name
+    tracks["group_name"] = group_name
+    tracks["genotype"] = rep_name[0]
+    tracks["odor"] = rep_name[1]
+    tracks["date"] = pd.to_datetime(rep_name[2], format="%d%m%y")
+    tracks["odor_position"] = int(rep_name[3])
+    tracks["operator"] = "".join(
+        [c for c in rep_name[4] if not c.isdigit()]
+    )  # Getting letters
+    tracks["operator_nb_video"] = int(
+        "".join([c for c in rep_name[4] if c.isdigit()])
+    )  # Getting numbers
+    tracks["nb_flies"] = int(rep_name[5])
+
+    tracks["dist_center"] = np.sqrt(np.square(tracks["x"]) + np.square(tracks["y"]))
+
+    tracks["scalar_vec_center"] = [
+        np.dot(x, y) / np.linalg.norm(y)
+        for index, (x, y) in enumerate(
+            zip(
+                np.column_stack(
+                    (
+                        tracks["diff_x"],
+                        tracks["diff_y"],
+                    )
+                ),
+                np.column_stack((-tracks["x"], -tracks["y"])),
+            )
+        )
+    ]
+    tracks["scalar_vec_center_tangent"] = np.sqrt(
+        np.abs(np.square(tracks["speed"]) - np.square(tracks["scalar_vec_center"]))
+    )
+
+    tracks["vec_odor_x"] = coord_odor[0] - tracks["x"]
+    tracks["vec_odor_y"] = coord_odor[1] - tracks["y"]
+
+    tracks["dist_odor"] = np.sqrt(
+        np.square(tracks["vec_odor_x"]) + np.square(tracks["vec_odor_y"])
+    )
+
+    tracks["scalar_vec_odor"] = [
+        np.dot(x, y) / np.linalg.norm(y)
+        for index, (x, y) in enumerate(
+            zip(
+                np.column_stack(
+                    (
+                        tracks["diff_x"],
+                        tracks["diff_y"],
+                    )
+                ),
+                np.column_stack((tracks["vec_odor_x"], tracks["vec_odor_y"])),
+            )
+        )
+    ]
+
+    tracks["scalar_vec_odor_tangent"] = np.sqrt(
+        np.abs(np.square(tracks["speed"]) - np.square(tracks["scalar_vec_odor"]))
+    )
+
+    with gzip.open(DATAFRAME_FILE, "wt") as f:
+        tracks.to_json(f, orient="table")
