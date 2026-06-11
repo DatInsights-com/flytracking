@@ -32,6 +32,7 @@ MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [5, 5])
 TAG_1_FILE = "flytracking/patterns/tag_1.png"
 TAG_2_FILE = "flytracking/patterns/tag_2.png"
 HOLE_PATTERN_FILE = "flytracking/patterns/hole_pattern.png"
+HOLES_MASK_FILE = "flytracking/patterns/holes_mask.png"
 HOLE_LABELS = [6, 1, 2, 3, 4, 5]
 
 
@@ -65,12 +66,18 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
     bg_path = f"{out_dir}/{video_name}_background.png"
     tag_1 = cv2.imread(TAG_1_FILE, cv2.IMREAD_GRAYSCALE)
     tag_2 = cv2.imread(TAG_2_FILE, cv2.IMREAD_GRAYSCALE)
+    holes_mask = cv2.imread(HOLES_MASK_FILE, cv2.IMREAD_GRAYSCALE)
     hole_pattern = cv2.imread(HOLE_PATTERN_FILE, cv2.IMREAD_GRAYSCALE)
     hole_pattern_offset = np.array(hole_pattern.shape) / 2
 
     bg_img = cv2.imread(bg_path, cv2.IMREAD_GRAYSCALE)
     bg_w, bg_h = bg_img.shape
     bg_img_corner = bg_img[int(bg_w * 0.75) :, int(bg_h * 0.75) :]
+
+    holes_mask = holes_mask[
+        int(hole_pattern_offset[0]) : int(bg_w - hole_pattern_offset[0]) + 1,
+        int(hole_pattern_offset[1]) : int(bg_h - hole_pattern_offset[1]) + 1,
+    ]
 
     res_1 = np.max(cv2.matchTemplate(bg_img_corner, tag_1, cv2.TM_CCOEFF_NORMED))
     res_2 = np.max(cv2.matchTemplate(bg_img_corner, tag_2, cv2.TM_CCOEFF_NORMED))
@@ -84,29 +91,15 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
 
     holes = cv2.matchTemplate(bg_img, hole_pattern, cv2.TM_CCOEFF_NORMED)
     holes[holes < 0.25] = 0
-    holes = (holes * 255).astype(np.uint8)
+    holes = (holes * holes_mask).astype(np.uint8)
     contours, _ = cv2.findContours(
         holes,
         cv2.RETR_LIST,
         cv2.CHAIN_APPROX_SIMPLE,
     )
     objects_circles = [cv2.minEnclosingCircle(cnt) for cnt in contours]
-    objects_circles = [
-        ((a, b), r)
-        for ((a, b), r) in objects_circles
-        if np.abs(
-            np.sqrt(
-                (
-                    np.square(a + hole_pattern_offset[0] - (bg_w / 2))
-                    + np.square(b + hole_pattern_offset[1] - (bg_h / 2))
-                )
-            )
-            - 567
-        )
-        < 100
-    ]
     objects_intensities = np.array(
-        [holes[int(b), int(a)] for (a, b), _ in objects_circles]
+        [holes[round(b), round(a)] for (a, b), _ in objects_circles]
     )
     rank_intensities = np.argsort(-objects_intensities)[:6].tolist()
 
