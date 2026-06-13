@@ -24,6 +24,7 @@ MOVING_AVG_WINDOW = int(1200)
 
 PIXEL_SIZE = 0.1975  # mm/px
 FRAME_DURATION = 1 / 20  # seconds
+MAX_DIST_CENTER = 210  # mm
 
 matplotlib.use("agg")
 
@@ -430,6 +431,10 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
         -tracks.groupby("track_id")["axis_2"].diff(periods=-1) / tracks["diff_time"]
     )
     tracks = tracks.drop("diff_time", axis=1)
+
+    tracks = tracks.loc[
+        np.sqrt(np.square(tracks["x"]) + np.square(tracks["y"])) < MAX_DIST_CENTER
+    ]
 
     all_tracks = []
     track_ids = tracks["track_id"].unique()
