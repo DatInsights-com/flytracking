@@ -3,20 +3,16 @@
 # Date: May 7, 2026
 # Version: 1.1
 
-import numpy as np
-import cv2
-
-import threading
-import os
-
-from multiprocessing import Process, JoinableQueue, Queue
-from multiprocessing import shared_memory
-
-from scipy.stats import chi2
-from math import radians, degrees
-
-import json
 import gzip
+import json
+import os
+import threading
+from math import degrees, radians
+from multiprocessing import JoinableQueue, Process, shared_memory
+
+import cv2
+import numpy as np
+from scipy.stats import chi2
 
 N_MAX_OBJS_PER_FRAME = 50
 N_WORKERS = 4
@@ -34,6 +30,7 @@ TAG_2_FILE = "flytracking/patterns/tag_2.png"
 HOLE_PATTERN_FILE = "flytracking/patterns/hole_pattern.png"
 HOLES_MASK_FILE = "flytracking/patterns/holes_mask.png"
 HOLE_LABELS = [6, 1, 2, 3, 4, 5]
+MORPH_KERNEL_HOLES = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, [20, 20])
 
 
 def cart2pol(x, y):
@@ -75,8 +72,14 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
     bg_img_corner = bg_img[int(bg_w * 0.75) :, int(bg_h * 0.75) :]
 
     holes_mask = holes_mask[
-        int(hole_pattern_offset[0]) : int(bg_w - hole_pattern_offset[0]) + 1,
-        int(hole_pattern_offset[1]) : int(bg_h - hole_pattern_offset[1]) + 1,
+        int(hole_pattern_offset[0] + 1024 - bg_w / 2) : int(
+            bg_w - hole_pattern_offset[0] + 1024 - bg_w / 2
+        )
+        + 1,
+        int(hole_pattern_offset[1] + 1024 - bg_h / 2) : int(
+            bg_w - hole_pattern_offset[1] + 1024 - bg_h / 2
+        )
+        + 1,
     ]
 
     res_1 = np.max(cv2.matchTemplate(bg_img_corner, tag_1, cv2.TM_CCOEFF_NORMED))
@@ -90,8 +93,11 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
     coordinates.update({"plate_id": plate})
 
     holes = cv2.matchTemplate(bg_img, hole_pattern, cv2.TM_CCOEFF_NORMED)
-    holes[holes < 0.25] = 0
+    holes[holes < 0.2] = 0
+    holes = holes * holes_mask
+    holes = holes == cv2.dilate(holes, MORPH_KERNEL_HOLES, iterations=20)
     holes = (holes * holes_mask).astype(np.uint8)
+    holes = cv2.dilate(holes, MORPH_KERNEL, iterations=1)
     contours, _ = cv2.findContours(
         holes,
         cv2.RETR_LIST,
@@ -132,7 +138,7 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
     cv2.putText(
         bg_img_overlay,
         "plate: " + str(plate),
-        [1700, 100],
+        [1600, 100],
         cv2.FONT_HERSHEY_SIMPLEX,
         2,
         (0, 0, 0),
