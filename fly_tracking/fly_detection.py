@@ -415,50 +415,53 @@ def process_frame_detection(fg_frame):
   
     contours_area = [cv2.contourArea(cnt) for cnt in all_contours]
 
-    all_contours, contours_area = zip(
-        *[
-            (cnt, ar)
-            for (cnt, ar) in zip(all_contours, contours_area)
-            if (len(cnt) > 4) and (ar > MIN_AREA)
+    if len(all_contours)>0:
+        all_contours, contours_area = zip(
+            *[
+                (cnt, ar)
+                for (cnt, ar) in zip(all_contours, contours_area)
+                if (len(cnt) > 4) and (ar > MIN_AREA)
+            ]
+        )
+
+        objects_rectangles = [cv2.minAreaRect(cnt) for cnt in all_contours]
+        objects_rectangles = [
+            obj
+            for obj in objects_rectangles
+            if (obj[0][0] < fg_mask.shape[1])
+            and (obj[0][1] < fg_mask.shape[0])
+            and (obj[0][0] >= 0)
+            and (obj[0][1] >= 0)
         ]
-    )
+        objects_rectangles = [
+            ([(y, x), (ax1, ax2), r] if ax1 < ax2 else [(y, x), (ax2, ax1), r + 90])
+            for (y, x), (ax1, ax2), r in objects_rectangles
+        ]
+        # [y, x, axis_1/2, axis_2/2, angle_degree]
+        objects_intensities = [
+            fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_rectangles
+        ]
+        objects_properties = np.stack(
+            [
+                [o[1][0] for o in objects_rectangles],
+                [o[1][1] for o in objects_rectangles],
+                objects_intensities,
+            ],
+            axis=1,
+        )
 
-    objects_rectangles = [cv2.minAreaRect(cnt) for cnt in all_contours]
-    objects_rectangles = [
-        obj
-        for obj in objects_rectangles
-        if (obj[0][0] < fg_mask.shape[1])
-        and (obj[0][1] < fg_mask.shape[0])
-        and (obj[0][0] >= 0)
-        and (obj[0][1] >= 0)
-    ]
-    objects_rectangles = [
-        ([(y, x), (ax1, ax2), r] if ax1 < ax2 else [(y, x), (ax2, ax1), r + 90])
-        for (y, x), (ax1, ax2), r in objects_rectangles
-    ]
-    # [y, x, axis_1/2, axis_2/2, angle_degree]
-    objects_intensities = [
-        fg_smooth[int(x), int(y)] for (y, x), (_, _), _ in objects_rectangles
-    ]
-    objects_properties = np.stack(
-        [
-            [o[1][0] for o in objects_rectangles],
-            [o[1][1] for o in objects_rectangles],
-            objects_intensities,
-        ],
-        axis=1,
-    )
+        if objects_properties.shape[0]>2:
+            confidence = calculate_confidence(objects_properties)
+        else:
+            confidence = np.ones(objects_properties.shape[0])
 
-    if objects_properties.shape[0]>2:
-        confidence = calculate_confidence(objects_properties)
+        objects_rectangles = [
+            [a, b, 2.5 * c, 2.5 * d, radians(e), f]
+            for ((a, b), (c, d), e), (f) in zip(objects_rectangles, confidence)
+            if f > 0
+        ]
     else:
-        confidence = np.ones(objects_properties.shape[0])
-
-    objects_rectangles = [
-        [a, b, 2.5 * c, 2.5 * d, radians(e), f]
-        for ((a, b), (c, d), e), (f) in zip(objects_rectangles, confidence)
-        if f > 0
-    ]
+        objects_rectangles = []
 
     return objects_rectangles
 
