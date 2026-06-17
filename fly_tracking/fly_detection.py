@@ -412,7 +412,7 @@ def process_frame_detection(fg_frame):
                 all_contours.append(c)
         else:
             all_contours.append(cnt)
-
+  
     contours_area = [cv2.contourArea(cnt) for cnt in all_contours]
 
     all_contours, contours_area = zip(
@@ -448,7 +448,11 @@ def process_frame_detection(fg_frame):
         ],
         axis=1,
     )
-    confidence = calculate_confidence(objects_properties)
+
+    if objects_properties.shape[0]>2:
+        confidence = calculate_confidence(objects_properties)
+    else:
+        confidence = np.ones(objects_properties.shape[0])
 
     objects_rectangles = [
         [a, b, 2.5 * c, 2.5 * d, radians(e), f]
