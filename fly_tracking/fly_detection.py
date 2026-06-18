@@ -77,7 +77,7 @@ def register_background_coordinates(video_path: str, out_dir: str, overwrite: bo
         )
         + 1,
         int(hole_pattern_offset[1] + 1024 - bg_h / 2) : int(
-            bg_w - hole_pattern_offset[1] + 1024 - bg_h / 2
+            bg_h - hole_pattern_offset[1] + 1024 - bg_h / 2
         )
         + 1,
     ]
