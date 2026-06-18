@@ -242,7 +242,7 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
     p1 = (
         pn.ggplot(data)
         + pn.aes(x="x", y="y", color="track_id")
-        + pn.geom_path(size=0.5)
+        + pn.geom_path(size=0.5, na_rm=True)
         + pn.coord_equal()
         + pn.theme_void()
         + pn.theme(legend_position="none")
@@ -255,12 +255,14 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         + pn.geom_point(
             size=0.1,
             data=data,
-            mapping=pn.aes(color="track_id"),
+            mapping=pn.aes(color="track_id"), 
+            na_rm=True,
         )
         + pn.geom_point(
             color="black",
             size=0.5,
-            data=data.loc[data["diff_frame"] > 1],
+            data=data.loc[data["diff_frame"] > 1], 
+            na_rm=True,
         )
     )
     if (data.loc[data["diff_frame"] > 1]).empty:
@@ -269,13 +271,13 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         p3 = (
             pn.ggplot(data.loc[data["diff_frame"] > 1])
             + pn.aes(x="track_id", y="diff_frame", color="track_id")
-            + pn.geom_sina()
+            + pn.geom_jitter(alpha = 0.5, na_rm=True)
         )
 
     p4 = (
         pn.ggplot(data)
         + pn.aes(x="frame", y="cumul_dist", color="track_id")
-        + pn.geom_line(size=0.5)
+        + pn.geom_line(size=0.5, na_rm=True)
     )
 
     p5 = (
@@ -293,40 +295,40 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
     p6 = (
         pn.ggplot(data)
         + pn.aes(x="track_id", y="diff_xy", fill="track_id")
-        + pn.geom_violin(width=1.5, size=0.1)
+        + pn.geom_violin(width=1, size=0.1, na_rm=True)
         + pn.scale_y_continuous(limits=[0, 25], trans="sqrt")
     )
 
     p7 = (
         pn.ggplot(data)
         + pn.aes(x="track_id", y="orientation", fill="track_id")
-        + pn.geom_violin(width=1, size=0.1)
+        + pn.geom_violin(width=1, size=0.1, na_rm=True)
     )
 
     p8 = (
         pn.ggplot(data)
         + pn.aes(x="track_id", y="axis_1", fill="track_id")
-        + pn.geom_violin(width=1, size=0.1)
+        + pn.geom_violin(width=1, size=0.1, na_rm=True)
     )
 
     p9 = (
         pn.ggplot(data)
         + pn.aes(x="track_id", y="axis_2", fill="track_id")
-        + pn.geom_violin(width=1, size=0.1)
+        + pn.geom_violin(width=1, size=0.1, na_rm=True)
     )
     data_msd = calculate_msd_lontracks(data)
 
     p10 = (
         pn.ggplot(data_msd)
         + pn.aes(x="period", y="msd", color="track_id")
-        + pn.geom_line(size=0.5)
+        + pn.geom_line(size=0.5,na_rm=True)
     )
     data_vac = calculate_vac_lontracks(data)
 
     p11 = (
         pn.ggplot(data_vac)
         + pn.aes(x="period", y="vac", color="track_id")
-        + pn.geom_line(size=0.5)
+        + pn.geom_line(size=0.5, na_rm=True)
         + pn.scale_x_sqrt()
     )
 
@@ -460,7 +462,7 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
     tracks["group_name"] = group_name
     tracks["genotype"] = rep_name[0]
     tracks["odor"] = rep_name[1]
-    tracks["date"] = pd.to_datetime(rep_name[2], format="%d%m%y")
+    tracks["date"] = pd.to_datetime(rep_name[2], format='mixed', dayfirst=True, errors='coerce')
     tracks["odor_position"] = int(rep_name[3])
     tracks["operator"] = "".join(
         [c for c in rep_name[4] if not c.isdigit()]
