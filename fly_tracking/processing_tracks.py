@@ -9,6 +9,8 @@ import json
 import gzip
 import pandas as pd
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import matplotlib
 import plotnine as pn
 from itertools import product
@@ -255,13 +257,13 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         + pn.geom_point(
             size=0.1,
             data=data,
-            mapping=pn.aes(color="track_id"), 
+            mapping=pn.aes(color="track_id"),
             na_rm=True,
         )
         + pn.geom_point(
             color="black",
             size=0.5,
-            data=data.loc[data["diff_frame"] > 1], 
+            data=data.loc[data["diff_frame"] > 1],
             na_rm=True,
         )
     )
@@ -271,7 +273,7 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
         p3 = (
             pn.ggplot(data.loc[data["diff_frame"] > 1])
             + pn.aes(x="track_id", y="diff_frame", color="track_id")
-            + pn.geom_jitter(alpha = 0.5, na_rm=True)
+            + pn.geom_jitter(alpha=0.5, na_rm=True)
         )
 
     p4 = (
@@ -321,7 +323,7 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
     p10 = (
         pn.ggplot(data_msd)
         + pn.aes(x="period", y="msd", color="track_id")
-        + pn.geom_line(size=0.5,na_rm=True)
+        + pn.geom_line(size=0.5, na_rm=True)
     )
     data_vac = calculate_vac_lontracks(data)
 
@@ -345,7 +347,7 @@ def plot_longtracks_summary(video_path: str, out_dir: str, overwrite: bool):
 def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
     video_name = os.path.basename(video_path).split(".")[0]
 
-    DATAFRAME_FILE = f"{out_dir}/{video_name}_dataframe.json.gz"
+    DATAFRAME_FILE = f"{out_dir}/{video_name}_dataframe.parquet"
     if os.path.exists(DATAFRAME_FILE) and (not overwrite):
         return
 
@@ -359,8 +361,6 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
         coordinates = json.load(f)
 
     parts = out_dir.split("/")
-    exp_name = parts[-2]
-    group_name = parts[-1]
     rep_name = (
         video_name.replace("2_butanone", "2-butanone")
         .replace("mineral_oil", "mineral-oil")
@@ -409,8 +409,8 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
 
     tracks["axis_1"] = tracks["axis_1"] * PIXEL_SIZE
     tracks["axis_2"] = tracks["axis_2"] * PIXEL_SIZE
-    tracks["frame"] = tracks["frame"].astype(np.int32)
-    tracks["track_id"] = tracks["track_id"].astype(np.int32)
+    tracks["frame"] = tracks["frame"].astype(np.int64)
+    tracks["track_id"] = tracks["track_id"].astype(np.int64)
     tracks["time"] = tracks["frame"] * FRAME_DURATION
 
     tracks = tracks.sort_values(["track_id", "frame"])
@@ -458,20 +458,6 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
     tracks["track_id"] = tracks["track_id"].astype(np.int64)
     tracks["frame"] = tracks["frame"].astype(np.int64)
 
-    tracks["exp_name"] = exp_name
-    tracks["group_name"] = group_name
-    tracks["genotype"] = rep_name[0]
-    tracks["odor"] = rep_name[1]
-    tracks["date"] = pd.to_datetime(rep_name[2], format='mixed', dayfirst=True, errors='coerce')
-    tracks["odor_position"] = int(rep_name[3])
-    tracks["operator"] = "".join(
-        [c for c in rep_name[4] if not c.isdigit()]
-    )  # Getting letters
-    tracks["operator_nb_video"] = int(
-        "".join([c for c in rep_name[4] if c.isdigit()])
-    )  # Getting numbers
-    tracks["nb_flies"] = int(rep_name[5])
-
     tracks["dist_center"] = np.sqrt(np.square(tracks["x"]) + np.square(tracks["y"]))
 
     tracks["scalar_vec_center"] = [
@@ -518,5 +504,4 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
         np.abs(np.square(tracks["speed"]) - np.square(tracks["scalar_vec_odor"]))
     )
 
-    with gzip.open(DATAFRAME_FILE, "wt") as f:
-        tracks.to_json(f, orient="table")
+    pq.write_table(pa.Table.from_pandas(tracks), DATAFRAME_FILE, compression="GZIP")
