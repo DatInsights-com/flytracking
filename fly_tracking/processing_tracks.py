@@ -9,8 +9,6 @@ import json
 import gzip
 import pandas as pd
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 import matplotlib
 import plotnine as pn
 from itertools import product
@@ -504,4 +502,4 @@ def tracks_to_dataframe(video_path: str, out_dir: str, overwrite: bool):
         np.abs(np.square(tracks["speed"]) - np.square(tracks["scalar_vec_odor"]))
     )
 
-    pq.write_table(pa.Table.from_pandas(tracks), DATAFRAME_FILE, compression="GZIP")
+    tracks.to_parquet(DATAFRAME_FILE, compression="gzip")
